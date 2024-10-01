@@ -32,7 +32,7 @@ SECTIONS
     . = ALIGN(4K);
     edata = .;
     .bss : {
-        *(.bss.stack)
+        *(.bss.stack) /* stack挨着实际的bss放置 */
         sbss = .;
         *(.bss .bss.*)
         *(.sbss .sbss.*)
