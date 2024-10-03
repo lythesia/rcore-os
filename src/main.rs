@@ -1,17 +1,50 @@
 #![no_main]
 #![no_std]
 
+mod config;
 mod console;
 mod lang_item;
+mod logging;
 mod sbi;
+mod timer;
 
 use core::arch::global_asm;
 global_asm!(include_str!("entry.asm"));
 
+// 使用fn不用static usize的好处是后续使用不用unsafe block:
+// use of extern static is unsafe and requires unsafe function or block
+// extern statics are not controlled by the Rust type system: invalid data, aliasing violations or data races will cause undefined behavior
+extern "C" {
+    fn stext();
+    fn etext();
+
+    fn srodata();
+    fn erodata();
+
+    fn sdata();
+    fn edata();
+
+    fn sbss();
+    fn ebss();
+}
+
 #[no_mangle]
 pub fn rust_main() -> ! {
     clear_bss();
-    println!("hello, {} @ {}", "rust_main", "os");
+    logging::init();
+
+    log::debug!("hello, {} @ {}", "rust_main", "os");
+
+    log::info!(".text [{:#x}, {:#x})", stext as usize, etext as usize);
+    log::info!(".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
+    log::info!(".data [{:#x}, {:#x})", sdata as usize, edata as usize);
+    log::info!(".bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
+
+    log::warn!("sleep 5s ..");
+    timer::sleep_us(5_000_000);
+    log::warn!("wake!");
+    log::error!("die!");
+
     panic!("Shutdown machine!");
 }
 
@@ -38,12 +71,7 @@ fn clear_bss() {
     // (sbss as usize..ebss as usize).for_each(|a| unsafe {
     //     (a as *mut u8).write_volatile(0);
     // });
-    // OR
-    extern "C" {
-        static sbss: usize;
-        static ebss: usize;
-    }
     unsafe {
-        (sbss..ebss).for_each(|a| (a as *mut u8).write_volatile(0));
+        (sbss as usize..ebss as usize).for_each(|a| (a as *mut u8).write_volatile(0));
     }
 }
