@@ -1,15 +1,22 @@
 #![no_main]
 #![no_std]
+#![feature(array_windows)]
 
+mod batch;
 mod config;
+#[macro_use]
 mod console;
 mod lang_item;
 mod logging;
 mod sbi;
+mod sync;
+mod syscall;
 mod timer;
+mod trap;
 
 use core::arch::global_asm;
 global_asm!(include_str!("entry.asm"));
+global_asm!(include_str!("link_app.S"));
 
 // 使用fn不用static usize的好处是后续使用不用unsafe block:
 // use of extern static is unsafe and requires unsafe function or block
@@ -26,6 +33,9 @@ extern "C" {
 
     fn sbss();
     fn ebss();
+
+    fn boot_stack_top();
+    fn boot_stack_lower_bound();
 }
 
 #[no_mangle]
@@ -35,17 +45,37 @@ pub fn rust_main() -> ! {
 
     log::debug!("hello, {} @ {}", "rust_main", "os");
 
-    log::info!(".text [{:#x}, {:#x})", stext as usize, etext as usize);
-    log::info!(".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
-    log::info!(".data [{:#x}, {:#x})", sdata as usize, edata as usize);
-    log::info!(".bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
+    log::info!(
+        "[kernel] .text [{:#x}, {:#x})",
+        stext as usize,
+        etext as usize
+    );
+    log::info!(
+        "[kernel] .rodata [{:#x}, {:#x})",
+        srodata as usize,
+        erodata as usize
+    );
+    log::info!(
+        "[kernel] .data [{:#x}, {:#x})",
+        sdata as usize,
+        edata as usize
+    );
+    log::info!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
+    log::info!(
+        "[kernel] boot_stack [{:#x}, {:#x})",
+        boot_stack_lower_bound as usize,
+        boot_stack_top as usize
+    );
 
-    log::warn!("sleep 5s ..");
-    timer::sleep_us(5_000_000);
+    log::warn!("sleep 1s ..");
+    timer::sleep_us(1_000_000);
     log::warn!("wake!");
-    log::error!("die!");
 
-    panic!("Shutdown machine!");
+    // 设置trap入口点
+    trap::init();
+    // 初始化AppManager
+    batch::init();
+    batch::run_next_app();
 }
 
 fn clear_bss() {
@@ -63,15 +93,8 @@ fn clear_bss() {
 
     // Cond: 不对，其实是能类似于`extern int c;`这样用的, 例子
     // https://github.com/rustsbi/rustsbi-qemu/blob/main/rustsbi-qemu/src/main.rs#L70
-    // extern "C" {
-    //     fn sbss();
-    //     fn ebss();
-    // }
-    // 起始和终止地址, 遍历该地址区间并逐字节进行清零即可
-    // (sbss as usize..ebss as usize).for_each(|a| unsafe {
-    //     (a as *mut u8).write_volatile(0);
-    // });
     unsafe {
-        (sbss as usize..ebss as usize).for_each(|a| (a as *mut u8).write_volatile(0));
+        core::slice::from_raw_parts_mut(sbss as usize as *mut u8, ebss as usize - sbss as usize)
+            .fill(0);
     }
 }

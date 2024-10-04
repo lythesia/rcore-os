@@ -6,13 +6,13 @@ use crate::{println, sbi::shutdown};
 fn panic(info: &PanicInfo) -> ! {
     if let Some(loc) = info.location() {
         println!(
-            "panicked at {}:{} {}",
+            "Panicked at {}:{} {}",
             loc.file(),
             loc.line(),
             info.message()
         );
     } else {
-        println!("panicked: {}", info.message());
+        println!("Panicked: {}", info.message());
     }
     shutdown(true)
 }
