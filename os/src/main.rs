@@ -9,6 +9,7 @@ mod console;
 mod lang_item;
 mod logging;
 mod sbi;
+mod stack_trace;
 mod sync;
 mod syscall;
 mod timer;
