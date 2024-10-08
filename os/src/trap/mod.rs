@@ -6,7 +6,7 @@ use riscv::register::{
     stval, stvec,
 };
 
-use crate::{batch::run_next_app, println, syscall::syscall};
+use crate::syscall::syscall;
 
 mod context;
 
@@ -40,12 +40,14 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
         }
         scause::Trap::Exception(Exception::StoreFault)
         | scause::Trap::Exception(Exception::StorePageFault) => {
-            println!("[kernel] PageFault in application, kernel killed it.");
-            run_next_app();
+            log::error!("[kernel] PageFault in application, kernel killed it.");
+            // panic!("[kernel] Cannot continue!");
+            crate::task::exit_current_and_run_next();
         }
         scause::Trap::Exception(Exception::IllegalInstruction) => {
-            println!("[kernel] IllegalInstruction in application, kernel killed it.");
-            run_next_app();
+            log::error!("[kernel] IllegalInstruction in application, kernel killed it.");
+            // panic!("[kernel] Cannot continue!");
+            crate::task::exit_current_and_run_next();
         }
         _ => {
             panic!(
@@ -58,5 +60,6 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
     // 传入的Trap 上下文 cx 原样返回 (其实是cx的地址)
     // 联系trap.S的__restore开头: mv sp, a0
     // 返回值在a0, 而a0指向cx即栈顶, sp此时也是栈顶, 所以sp <- a0无影响, 即对应case2
+    // 在ch3中, 这个返回值没有用到, 因为sp是kernel_stack栈顶, 已经是我们需要的
     cx
 }

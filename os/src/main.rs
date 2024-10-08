@@ -2,16 +2,19 @@
 #![no_std]
 #![feature(array_windows)]
 
-mod batch;
+// mod batch;
 mod config;
 #[macro_use]
 mod console;
 mod lang_item;
+mod loader;
 mod logging;
 mod sbi;
 mod stack_trace;
 mod sync;
 mod syscall;
+mod task;
+#[allow(unused)]
 mod timer;
 mod trap;
 
@@ -44,8 +47,6 @@ pub fn rust_main() -> ! {
     clear_bss();
     logging::init();
 
-    log::debug!("hello, {} @ {}", "rust_main", "os");
-
     log::info!(
         "[kernel] .text [{:#x}, {:#x})",
         stext as usize,
@@ -68,15 +69,14 @@ pub fn rust_main() -> ! {
         boot_stack_top as usize
     );
 
-    log::warn!("sleep 1s ..");
-    timer::sleep_us(1_000_000);
-    log::warn!("wake!");
+    // log::warn!("sleep 1s ..");
+    // timer::sleep_us(1_000_000);
+    // log::warn!("wake!");
 
-    // 设置trap入口点
     trap::init();
-    // 初始化AppManager
-    batch::init();
-    batch::run_next_app();
+    loader::load_apps();
+    task::run_first_task();
+    panic!("Unreachable in rust_main!");
 }
 
 fn clear_bss() {

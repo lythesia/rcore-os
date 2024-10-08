@@ -8,8 +8,15 @@
     ld x\n, \n*8(sp)
 .endm
 
-// __alltraps 的地址 4 字节对齐，这是 RISC-V 特权级规范的要求
-.align 2
+    .section .text
+    // 必须.globl导出全局符号, 否则link error
+    // Q: 为什么Ch2的时候没有报错?
+    // __alltraps可以解释, 因为在trap/mod.rs里global_asm!了, __alltraps是个local symbol
+    // 但是__restore是在batch.rs?
+    .globl __alltraps
+    .globl __restore
+    // __alltraps 的地址 4 字节对齐，这是 RISC-V 特权级规范的要求
+    .align 2
 __alltraps:
     // 原型是csrrw rd,csr,rs 可以将 CSR 当前的值读到通用寄存器rd中，然后将通用寄存器rs的值写入该 CSR 。因此这里起到的是交换 sscratch 和 sp 的效果
     // 这一行之前 sp 指向用户栈， sscratch 指向内核栈（原因稍后说明），现在 sp 指向内核栈， sscratch 指向用户栈
@@ -53,10 +60,8 @@ __alltraps:
     call trap_handler
 
 __restore:
-    // case1: start running app by __restore
-    // case2: back to U after handling trap
-    // 统一trap返回和创建新应用程序的sp都是内核栈顶
-    mv sp, a0
+    // 不再需要 在开头 mv sp, a0 了。因为在 __switch 之后，sp 就已经正确指向了我们需要的 Trap 上下文地址。
+    // mv sp, a0
     // 从内核栈顶的 Trap 上下文恢复通用寄存器和 CSR
     // now sp->kernel stack(after allocated), sscratch->user stack
     // 如果是第一次运行__restore(来开始运行第一个应用程序)的时候:
