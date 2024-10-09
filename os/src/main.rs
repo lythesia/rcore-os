@@ -69,12 +69,9 @@ pub fn rust_main() -> ! {
         boot_stack_top as usize
     );
 
-    // log::warn!("sleep 1s ..");
-    // timer::sleep_us(1_000_000);
-    // log::warn!("wake!");
-
     trap::init();
     loader::load_apps();
+    trap::enable_timer_interrupt();
     task::run_first_task();
     panic!("Unreachable in rust_main!");
 }

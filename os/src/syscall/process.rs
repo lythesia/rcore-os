@@ -1,4 +1,4 @@
-use crate::task::*;
+use crate::{task::*, timer::get_time_ms};
 
 /// task exits and submit an exit code
 pub fn sys_exit(exit_code: i32) -> ! {
@@ -7,7 +7,13 @@ pub fn sys_exit(exit_code: i32) -> ! {
     panic!("Unreachable in sys_exit!");
 }
 
+/// current task gives up resources for other tasks
 pub fn sys_yield() -> isize {
     suspend_current_and_run_next();
     0
+}
+
+/// get time in ms
+pub fn sys_get_time() -> isize {
+    get_time_ms() as isize
 }

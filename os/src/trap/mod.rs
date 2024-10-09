@@ -2,8 +2,8 @@ use core::arch::global_asm;
 
 pub use context::TrapContext;
 use riscv::register::{
-    scause::{self, Exception},
-    stval, stvec,
+    scause::{self, Exception, Interrupt},
+    sie, stval, stvec,
 };
 
 use crate::syscall::syscall;
@@ -20,6 +20,13 @@ pub fn init() {
 
     unsafe {
         stvec::write(__alltraps as usize, stvec::TrapMode::Direct);
+    }
+}
+
+/// timer interrupt enabled
+pub fn enable_timer_interrupt() {
+    unsafe {
+        sie::set_stimer(); // 实际是设置了sie寄存器的stie位, 使得S特权级时钟中断不会被屏蔽
     }
 }
 
@@ -41,13 +48,15 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
         scause::Trap::Exception(Exception::StoreFault)
         | scause::Trap::Exception(Exception::StorePageFault) => {
             log::error!("[kernel] PageFault in application, kernel killed it.");
-            // panic!("[kernel] Cannot continue!");
             crate::task::exit_current_and_run_next();
         }
         scause::Trap::Exception(Exception::IllegalInstruction) => {
             log::error!("[kernel] IllegalInstruction in application, kernel killed it.");
-            // panic!("[kernel] Cannot continue!");
             crate::task::exit_current_and_run_next();
+        }
+        scause::Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            crate::timer::set_next_trigger();
+            crate::task::suspend_current_and_run_next();
         }
         _ => {
             panic!(
