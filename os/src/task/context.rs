@@ -21,11 +21,11 @@ impl TaskContext {
 
     pub fn goto_restore(kstack_ptr: usize) -> Self {
         extern "C" {
-            fn __restore();
+            fn __pre_restore();
         }
 
         Self {
-            ra: __restore as usize,
+            ra: __pre_restore as usize,
             sp: kstack_ptr,
             s: [0; 12],
         }

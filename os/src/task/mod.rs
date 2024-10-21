@@ -1,9 +1,8 @@
 use context::TaskContext;
 use lazy_static::lazy_static;
-use switch::__switch;
 use task::{TaskControlBlock, TaskStatus};
 
-use crate::{config::MAX_APP_NUM, loader, sbi::shutdown, sync::UPSafeCell};
+use crate::{config::MAX_APP_NUM, loader, sbi::shutdown, sync::UPSafeCell, timer::get_time_us};
 
 mod context;
 mod switch;
@@ -15,6 +14,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_status: task::TaskStatus::UnInit,
             task_cx: TaskContext::zero_init(),
+            user_time: 0,
+            kernel_time: 0,
         }; MAX_APP_NUM];
 
         for (i, task) in tasks.iter_mut().enumerate() {
@@ -28,6 +29,7 @@ lazy_static! {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     curr_task: 0,
+                    stop_watch: 0,
                 })
             },
         }
@@ -40,8 +42,21 @@ pub struct TaskManager {
 }
 
 struct TaskManagerInner {
+    /// task list
     tasks: [TaskControlBlock; MAX_APP_NUM],
+    /// id of current `Running` task
     curr_task: usize,
+    /// stop watch
+    stop_watch: usize,
+}
+
+impl TaskManagerInner {
+    /// stop_watch <- now, return time of `last stop` until `now`
+    fn refresh_stop_watch(&mut self) -> usize {
+        let start = self.stop_watch;
+        self.stop_watch = get_time_us();
+        self.stop_watch - start
+    }
 }
 
 impl TaskManager {
@@ -51,6 +66,8 @@ impl TaskManager {
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
+        // 开始记录时间, 但是第一个task之后会一直执行到suspend或exit
+        inner.refresh_stop_watch();
         drop(inner);
         let mut _unused = TaskContext::zero_init();
         unsafe {
@@ -62,12 +79,25 @@ impl TaskManager {
     fn mark_current_suspended(&self) {
         let mut inner = self.inner.exclusive_access();
         let curr = inner.curr_task;
+        // curr_task挂起, 应当停表累加kernel_time, 而__switch耗时应当不算入curr/next_task的kernel_time
+        inner.tasks[curr].kernel_time += inner.refresh_stop_watch();
+        // log::debug!("[kernel] Task_{} => Ready(suspended)", curr);
         inner.tasks[curr].task_status = TaskStatus::Ready;
     }
 
     fn mark_current_exited(&self) {
         let mut inner = self.inner.exclusive_access();
         let curr = inner.curr_task;
+        // curr_task完成, 因为task退出也是调用sys_exit, 这个syscall本身也当计入kernel_time
+        inner.tasks[curr].kernel_time += inner.refresh_stop_watch();
+        let user_time = inner.tasks[curr].user_time;
+        let kernel_time = inner.tasks[curr].kernel_time;
+        log::debug!(
+            "[kernel] Task_{} => Exited | user_time = {} us, kernel_time = {} us",
+            curr,
+            user_time,
+            kernel_time
+        );
         inner.tasks[curr].task_status = TaskStatus::Exited;
     }
 
@@ -88,7 +118,11 @@ impl TaskManager {
         let next = match self.find_next_task() {
             Some(v) => v,
             _ => {
-                log::debug!("All applications completed!");
+                log::debug!(
+                    "[kernel] task switch time (in total): {} us",
+                    get_switch_time_count()
+                );
+                log::info!("All applications completed!");
                 shutdown(false);
             }
         };
@@ -106,10 +140,40 @@ impl TaskManager {
         // 解释一下, 这里switch到别的trap控制流以后, 后者也是要访问TaskManager的, 当exclusive_acess的时候就panic:
         // borrowed already
         drop(inner);
+        // log::debug!("[kernel] Task_{} => Task_{}", curr, next);
         unsafe {
             __switch(current_task_cx_ptr, next_task_cx_ptr);
         }
     }
+
+    pub fn user_time_start(&self) {
+        let mut inner = self.inner.exclusive_access();
+        let curr = inner.curr_task;
+        // 到user_time_start为止都是kernel_time, 故累加
+        // 隐含另一个意思, 从现在开始是user_time
+        inner.tasks[curr].kernel_time += inner.refresh_stop_watch();
+    }
+
+    pub fn user_time_end(&self) {
+        let mut inner = self.inner.exclusive_access();
+        let curr = inner.curr_task;
+        // 类似上面, 到user_time_end为止都是user_time, 故累加
+        // 隐含另一个意思, 从现在开始是kernel_time
+        inner.tasks[curr].user_time += inner.refresh_stop_watch();
+    }
+}
+
+pub static mut SWITCH_TIME_START: usize = 0;
+pub static mut SWITCH_TIME_COUNT: usize = 0; // 记录switch的**总开销**
+
+unsafe fn __switch(current_task_cx_ptr: *mut TaskContext, next_task_cx_ptr: *const TaskContext) {
+    SWITCH_TIME_START = get_time_us();
+    switch::__switch(current_task_cx_ptr, next_task_cx_ptr);
+    SWITCH_TIME_COUNT += get_time_us() - SWITCH_TIME_START;
+}
+
+fn get_switch_time_count() -> usize {
+    unsafe { SWITCH_TIME_COUNT }
 }
 
 pub fn run_first_task() {
@@ -136,4 +200,12 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+pub fn user_time_start() {
+    TASK_MANAGER.user_time_start()
+}
+
+pub fn user_time_end() {
+    TASK_MANAGER.user_time_end()
 }

@@ -14,7 +14,7 @@
     // __alltraps可以解释, 因为在trap/mod.rs里global_asm!了, __alltraps是个local symbol
     // 但是__restore是在batch.rs?
     .globl __alltraps
-    .globl __restore
+    .globl __pre_restore
     // __alltraps 的地址 4 字节对齐，这是 RISC-V 特权级规范的要求
     .align 2
 __alltraps:
@@ -92,3 +92,14 @@ __restore:
     csrrw sp, sscratch, sp
     // sret 指令回到 U 特权级继续运行应用程序控制流
     sret
+
+// __pre_restore必须放在__restore后, 这里__pre是执行逻辑上的__pre, 不是位置上的
+// 因为它只在task第一次运行时执行, 之后都是走__restore(之后的情况是指call trap_handler以后的ra是__restore)
+__pre_restore:
+    // 因为sp就是栈顶, 栈顶就是TrapContext, 也是switch_cost需要的参数
+    mv a0, sp
+    call switch_cost
+    // call完需要恢复sp
+    mv sp, a0
+    // 必须跳转到__restore进行正常流程
+    j __restore

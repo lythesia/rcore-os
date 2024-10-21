@@ -6,7 +6,7 @@ use riscv::register::{
     sie, stval, stvec,
 };
 
-use crate::syscall::syscall;
+use crate::{syscall::syscall, task, timer};
 
 mod context;
 
@@ -33,6 +33,7 @@ pub fn enable_timer_interrupt() {
 #[no_mangle]
 /// handle an interrupt, exception, or system call from user space
 pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
+    crate::task::user_time_end();
     let scause = scause::read();
     let stval = stval::read();
 
@@ -66,9 +67,16 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
             );
         }
     }
+    crate::task::user_time_start();
     // 传入的Trap 上下文 cx 原样返回 (其实是cx的地址)
     // 联系trap.S的__restore开头: mv sp, a0
     // 返回值在a0, 而a0指向cx即栈顶, sp此时也是栈顶, 所以sp <- a0无影响, 即对应case2
     // 在ch3中, 这个返回值没有用到, 因为sp是kernel_stack栈顶, 已经是我们需要的
+    cx
+}
+
+#[no_mangle]
+pub unsafe fn switch_cost(cx: &mut TrapContext) -> &mut TrapContext {
+    task::SWITCH_TIME_COUNT += timer::get_time_us() - task::SWITCH_TIME_START;
     cx
 }

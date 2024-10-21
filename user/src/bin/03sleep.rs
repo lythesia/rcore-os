@@ -10,7 +10,7 @@ use user_lib::{get_time, yield_};
 fn main() -> i32 {
     println!("sleep ..");
     let curr_timer = get_time();
-    let wait_for = curr_timer + 3000; // sleep 3000ms
+    let wait_for = curr_timer + 1; // sleep ms
     while get_time() < wait_for {
         yield_(); // yield, gives 10ms slice to others
     }
