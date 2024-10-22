@@ -1,3 +1,5 @@
+use crate::config::MAX_SYSCALL_NUM;
+
 use super::context::TaskContext;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -15,4 +17,5 @@ pub struct TaskControlBlock {
     pub task_cx: TaskContext,
     pub user_time: usize,
     pub kernel_time: usize,
+    pub syscall_times: [usize; MAX_SYSCALL_NUM],
 }

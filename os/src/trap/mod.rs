@@ -44,7 +44,9 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
             // 因此我们只需修改 Trap 上下文里面的 sepc，让它增加 ecall 指令的码长，也即 4 字节
             // 这样在 __restore 的时候 sepc 在恢复之后就会指向 ecall 的下一条指令
             cx.sepc += 4;
-            cx.x[10] = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]) as usize;
+            let syscall_id = cx.x[17];
+            task::current_task_record_syscall(syscall_id);
+            cx.x[10] = syscall(syscall_id, [cx.x[10], cx.x[11], cx.x[12]]) as usize;
         }
         scause::Trap::Exception(Exception::StoreFault)
         | scause::Trap::Exception(Exception::StorePageFault) => {

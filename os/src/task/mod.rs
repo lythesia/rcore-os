@@ -2,7 +2,13 @@ use context::TaskContext;
 use lazy_static::lazy_static;
 use task::{TaskControlBlock, TaskStatus};
 
-use crate::{config::MAX_APP_NUM, loader, sbi::shutdown, sync::UPSafeCell, timer::get_time_us};
+use crate::{
+    config::{MAX_APP_NUM, MAX_SYSCALL_NUM},
+    loader,
+    sbi::shutdown,
+    sync::UPSafeCell,
+    timer::get_time_us,
+};
 
 mod context;
 mod switch;
@@ -16,6 +22,7 @@ lazy_static! {
             task_cx: TaskContext::zero_init(),
             user_time: 0,
             kernel_time: 0,
+            syscall_times: [0; MAX_SYSCALL_NUM],
         }; MAX_APP_NUM];
 
         for (i, task) in tasks.iter_mut().enumerate() {
@@ -161,6 +168,34 @@ impl TaskManager {
         // 隐含另一个意思, 从现在开始是kernel_time
         inner.tasks[curr].user_time += inner.refresh_stop_watch();
     }
+
+    // fn current_task(&self) -> usize {
+    //     let inner = self.inner.exclusive_access();
+    //     inner.curr_task
+    // }
+
+    fn current_task_status(&self) -> TaskStatus {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.curr_task].task_status
+    }
+
+    fn current_task_run_time(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        let curr = &inner.tasks[inner.curr_task];
+        curr.kernel_time + curr.user_time
+    }
+
+    fn record_syscall(&self, id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let curr = inner.curr_task;
+        inner.tasks[curr].syscall_times[id] += 1;
+    }
+
+    // todo: opt copy?
+    fn current_task_syscall_times(&self) -> [usize; MAX_SYSCALL_NUM] {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.curr_task].syscall_times.clone()
+    }
 }
 
 pub static mut SWITCH_TIME_START: usize = 0;
@@ -208,4 +243,32 @@ pub fn user_time_start() {
 
 pub fn user_time_end() {
     TASK_MANAGER.user_time_end()
+}
+
+#[repr(C)]
+pub struct TaskInfo {
+    pub status: TaskStatus,
+    pub call: [usize; MAX_SYSCALL_NUM],
+    pub time: usize,
+}
+
+// pub fn get_current_task_id() -> usize {
+//     TASK_MANAGER.current_task()
+// }
+
+pub fn get_current_task_status() -> TaskStatus {
+    TASK_MANAGER.current_task_status()
+}
+
+pub fn get_current_task_run_time() -> usize {
+    TASK_MANAGER.current_task_run_time()
+}
+
+pub fn current_task_record_syscall(id: usize) {
+    TASK_MANAGER.record_syscall(id);
+}
+
+pub fn get_current_task_syscall_times() -> [usize; MAX_SYSCALL_NUM] {
+    let si = TASK_MANAGER.current_task_syscall_times();
+    si
 }

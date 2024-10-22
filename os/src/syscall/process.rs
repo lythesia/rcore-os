@@ -17,3 +17,15 @@ pub fn sys_yield() -> isize {
 pub fn sys_get_time() -> isize {
     get_time_ms() as isize
 }
+
+/// get info of current task
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
+    unsafe {
+        *ti = TaskInfo {
+            status: get_current_task_status(),
+            call: get_current_task_syscall_times(),
+            time: get_current_task_run_time(),
+        }
+    }
+    0
+}
