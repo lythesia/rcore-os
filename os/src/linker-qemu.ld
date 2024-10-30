@@ -10,6 +10,10 @@ SECTIONS
     stext = .;
     .text : {
         *(.text.entry) /* 包含内核第一条指令的 .text.entry 段放在最终的 .text 段的最开头 */
+        . = ALIGN(4k);
+        strampoline = .;
+        *(.text.trampoline);
+        . = ALIGN(4k);
         *(.text .text.*)
     }
 
@@ -31,6 +35,7 @@ SECTIONS
 
     . = ALIGN(4K);
     edata = .;
+    sbss_with_stack = .;
     .bss : {
         *(.bss.stack) /* stack挨着实际的bss放置 */
         sbss = .;

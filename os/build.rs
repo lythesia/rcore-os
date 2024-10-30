@@ -1,7 +1,7 @@
 use std::fs::{read_dir, File};
 use std::io::{Error, Result, Write};
 
-static TARGET_PATH: &str = "../user/target/riscv64gc-unknown-none-elf/release";
+static TARGET_PATH: &str = "../user/build/elf";
 
 fn main() {
     println!("cargo:rerun-if-changed=../user/src");
@@ -11,7 +11,7 @@ fn main() {
 
 fn insert_app_data() -> Result<()> {
     let mut f = File::create("src/link_app.S")?;
-    let mut apps = read_dir("../user/src/bin")?
+    let mut apps = read_dir(TARGET_PATH)?
         .into_iter()
         .map(|e| {
             let mut fname = e?
@@ -24,6 +24,9 @@ fn insert_app_data() -> Result<()> {
             Ok(fname)
         })
         .collect::<Result<Vec<_>>>()?;
+    if apps.is_empty() {
+        return Ok(());
+    }
     apps.sort();
 
     writeln!(
@@ -51,7 +54,7 @@ _num_app:
     .globl app_{0}_start
     .globl app_{0}_end
 app_{0}_start:
-    .incbin "{1}/{2}.bin"
+    .incbin "{1}/{2}.elf"
 app_{0}_end:"#,
             i, TARGET_PATH, app
         )?;

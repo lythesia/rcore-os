@@ -8,6 +8,7 @@ DISASM_TMP := target/$(TARGET)/$(MODE)/asm
 # Building mode argument
 ifeq ($(MODE), release)
 	MODE_ARG := --release
+	OBJCOPY_ARG := --strip-all
 endif
 
 # BOARD
@@ -34,7 +35,7 @@ env:
 	rustup component add llvm-tools-preview
 
 $(KERNEL_BIN): kernel
-	@$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
+	@$(OBJCOPY) $(KERNEL_ELF) $(OBJCOPY_ARG) -O binary $@
 
 kernel:
 	@echo Platform: $(BOARD)

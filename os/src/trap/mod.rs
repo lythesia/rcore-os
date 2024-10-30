@@ -1,4 +1,4 @@
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 
 pub use context::TrapContext;
 use riscv::register::{
@@ -6,20 +6,29 @@ use riscv::register::{
     sie, stval, stvec,
 };
 
-use crate::{syscall::syscall, task, timer};
+use crate::{
+    config::{TRAMPOLINE, TRAP_CONTEXT},
+    syscall::syscall,
+    task::{current_trap_cx, current_user_token},
+};
 
 mod context;
 
 global_asm!(include_str!("trap.S"));
 
-/// initialize CSR `stvec` as the entry of `__alltraps`
 pub fn init() {
-    extern "C" {
-        fn __alltraps();
-    }
+    set_kernel_trap_entry();
+}
 
+fn set_kernel_trap_entry() {
     unsafe {
-        stvec::write(__alltraps as usize, stvec::TrapMode::Direct);
+        stvec::write(trap_from_kernel as usize, stvec::TrapMode::Direct);
+    }
+}
+
+fn set_user_trap_entry() {
+    unsafe {
+        stvec::write(TRAMPOLINE as usize, stvec::TrapMode::Direct);
     }
 }
 
@@ -32,24 +41,23 @@ pub fn enable_timer_interrupt() {
 
 #[no_mangle]
 /// handle an interrupt, exception, or system call from user space
-pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
+pub fn trap_handler() -> ! {
     crate::task::user_time_end();
+    // 应用的 Trap 上下文不在内核地址空间，因此我们调用 current_trap_cx 来获取当前应用的 Trap 上下文的可变引用
+    // 而不是像之前那样作为参数传入 trap_handler
+    let cx = current_trap_cx();
     let scause = scause::read();
     let stval = stval::read();
 
     match scause.cause() {
         scause::Trap::Exception(Exception::UserEnvCall) => {
-            // 由 ecall 指令触发的系统调用，在进入 Trap 的时候，硬件会将 sepc 设置为这条 ecall 指令所在的地址
-            // 而在 Trap 返回之后，我们希望应用程序控制流从 ecall 的下一条指令开始执行
-            // 因此我们只需修改 Trap 上下文里面的 sepc，让它增加 ecall 指令的码长，也即 4 字节
-            // 这样在 __restore 的时候 sepc 在恢复之后就会指向 ecall 的下一条指令
             cx.sepc += 4;
             let syscall_id = cx.x[17];
-            task::current_task_record_syscall(syscall_id);
+            // task::current_task_record_syscall(syscall_id);
             cx.x[10] = syscall(syscall_id, [cx.x[10], cx.x[11], cx.x[12]]) as usize;
         }
-        scause::Trap::Exception(Exception::StoreFault)
-        | scause::Trap::Exception(Exception::StorePageFault) => {
+        scause::Trap::Exception(Exception::StorePageFault)
+        | scause::Trap::Exception(Exception::LoadPageFault) => {
             log::error!("[kernel] PageFault in application, kernel killed it.");
             crate::task::exit_current_and_run_next();
         }
@@ -70,15 +78,49 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
         }
     }
     crate::task::user_time_start();
-    // 传入的Trap 上下文 cx 原样返回 (其实是cx的地址)
-    // 联系trap.S的__restore开头: mv sp, a0
-    // 返回值在a0, 而a0指向cx即栈顶, sp此时也是栈顶, 所以sp <- a0无影响, 即对应case2
-    // 在ch3中, 这个返回值没有用到, 因为sp是kernel_stack栈顶, 已经是我们需要的
-    cx
+    trap_return()
 }
 
 #[no_mangle]
-pub unsafe fn switch_cost(cx: &mut TrapContext) -> &mut TrapContext {
-    task::SWITCH_TIME_COUNT += timer::get_time_us() - task::SWITCH_TIME_START;
-    cx
+pub fn trap_return() -> ! {
+    // stvec指向TRAMPOLINE, 我们已经map过从它开始的一个page(@MemorySet::map_trampoline), 指向物理地址的trap.S的code
+    // 其实就是__alltraps, 这样之后app在trap的时候会跳转到__alltraps
+    set_user_trap_entry();
+    // __restore的参数a0, Trap 上下文在应用地址空间中的虚拟地址
+    let trap_cx_ptr = TRAP_CONTEXT;
+    // __restore的参数a1, 应用地址空间的 token
+    let user_satp = current_user_token();
+
+    extern "C" {
+        fn __alltraps();
+        fn __restore();
+    }
+
+    // Q: 如何找到 __restore 在内核/应用地址空间中共同的虚拟地址
+    // A: 由于 __alltraps 是对齐到地址空间跳板页面的起始地址 TRAMPOLINE 上的，则 __restore 的虚拟地址
+    //    只需在 TRAMPOLINE 基础上加上 __restore 相对于 __alltraps 的偏移量即可
+    let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;
+    // fence.i 指令清空指令缓存 i-cache 。这是因为，在内核中进行的一些操作可能导致一些原先存放某个应用代码的物理页帧
+    // 如今用来存放数据或者是其他应用的代码，i-cache 中可能还保存着该物理页帧的错误快照
+    unsafe {
+        asm!(
+            "fence.i",
+            "jr {restore_va}",
+            restore_va = in(reg) restore_va,
+            in("a0") trap_cx_ptr,
+            in("a1") user_satp,
+            options(noreturn)
+        );
+    }
+}
+
+// #[no_mangle]
+// pub unsafe fn switch_cost(cx: &mut TrapContext) -> &mut TrapContext {
+//     task::SWITCH_TIME_COUNT += timer::get_time_us() - task::SWITCH_TIME_START;
+//     cx
+// }
+
+#[no_mangle]
+pub fn trap_from_kernel() -> ! {
+    panic!("a trap from kernel!");
 }
