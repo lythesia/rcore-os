@@ -1,12 +1,13 @@
 use core::arch::asm;
 
-use crate::TaskInfo;
+use crate::TimeVal;
 
 pub const SYSCALL_WRITE: usize = 64;
 pub const SYSCALL_EXIT: usize = 93;
 pub const SYSCALL_YIELD: usize = 124;
 pub const SYSCALL_GET_TIME: usize = 169;
-pub const SYSCALL_TASK_INFO: usize = 410;
+pub const SYSCALL_MUNMAP: usize = 215;
+pub const SYSCALL_MMAP: usize = 222;
 
 fn syscall(id: usize, args: [usize; 3]) -> isize {
     let mut ret: isize;
@@ -33,10 +34,14 @@ pub fn sys_yield() -> isize {
     syscall(SYSCALL_YIELD, [0, 0, 0])
 }
 
-pub fn sys_get_time() -> isize {
-    syscall(SYSCALL_GET_TIME, [0, 0, 0])
+pub fn sys_get_time(ts: &TimeVal) -> isize {
+    syscall(SYSCALL_GET_TIME, [ts as *const _ as usize, 0, 0])
 }
 
-pub fn sys_task_info(ti: &TaskInfo) -> isize {
-    syscall(SYSCALL_TASK_INFO, [ti as *const _ as usize, 0, 0])
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    syscall(SYSCALL_MMAP, [start, len, prot])
+}
+
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    syscall(SYSCALL_MUNMAP, [start, len, 0])
 }

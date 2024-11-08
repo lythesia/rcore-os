@@ -3,7 +3,14 @@ use context::TaskContext;
 use lazy_static::lazy_static;
 use task::{TaskControlBlock, TaskStatus};
 
-use crate::{loader, sbi::shutdown, sync::UPSafeCell, timer::get_time_us, trap::TrapContext};
+use crate::{
+    loader,
+    mm::{MapPermission, VPNRange, VirtPageNum},
+    sbi::shutdown,
+    sync::UPSafeCell,
+    timer::get_time_us,
+    trap::TrapContext,
+};
 
 mod context;
 mod switch;
@@ -11,9 +18,8 @@ mod task;
 
 lazy_static! {
     pub static ref TASK_MANAGER: TaskManager = {
-        log::info!("init TASK_MANAGER");
         let num_app = loader::get_num_app();
-        log::info!("num_app = {}", num_app);
+        log::info!("init TASK_MANAGER: num_app = {}", num_app);
         let mut tasks = Vec::new();
 
         for i in 0..num_app {
@@ -159,34 +165,6 @@ impl TaskManager {
         inner.tasks[curr].user_time += inner.refresh_stop_watch();
     }
 
-    // fn current_task(&self) -> usize {
-    //     let inner = self.inner.exclusive_access();
-    //     inner.curr_task
-    // }
-
-    // fn current_task_status(&self) -> TaskStatus {
-    //     let inner = self.inner.exclusive_access();
-    //     inner.tasks[inner.curr_task].task_status
-    // }
-
-    // fn current_task_run_time(&self) -> usize {
-    //     let inner = self.inner.exclusive_access();
-    //     let curr = &inner.tasks[inner.curr_task];
-    //     curr.kernel_time + curr.user_time
-    // }
-
-    // fn record_syscall(&self, id: usize) {
-    //     let mut inner = self.inner.exclusive_access();
-    //     let curr = inner.curr_task;
-    //     inner.tasks[curr].syscall_times[id] += 1;
-    // }
-
-    // // todo: opt copy?
-    // fn current_task_syscall_times(&self) -> [usize; MAX_SYSCALL_NUM] {
-    //     let inner = self.inner.exclusive_access();
-    //     inner.tasks[inner.curr_task].syscall_times.clone()
-    // }
-
     fn get_current_token(&self) -> usize {
         let inner = self.inner.exclusive_access();
         let current = inner.curr_task;
@@ -247,38 +225,42 @@ pub fn user_time_end() {
     TASK_MANAGER.user_time_end()
 }
 
-// #[repr(C)]
-// pub struct TaskInfo {
-//     pub status: TaskStatus,
-//     pub call: [usize; MAX_SYSCALL_NUM],
-//     pub time: usize,
-// }
-
-// pub fn get_current_task_id() -> usize {
-//     TASK_MANAGER.current_task()
-// }
-
-// pub fn get_current_task_status() -> TaskStatus {
-//     TASK_MANAGER.current_task_status()
-// }
-
-// pub fn get_current_task_run_time() -> usize {
-//     TASK_MANAGER.current_task_run_time()
-// }
-
-// pub fn current_task_record_syscall(id: usize) {
-//     TASK_MANAGER.record_syscall(id);
-// }
-
-// pub fn get_current_task_syscall_times() -> [usize; MAX_SYSCALL_NUM] {
-//     let si = TASK_MANAGER.current_task_syscall_times();
-//     si
-// }
-
 pub fn current_user_token() -> usize {
     TASK_MANAGER.get_current_token()
 }
 
 pub fn current_trap_cx() -> &'static mut TrapContext {
     TASK_MANAGER.get_current_trap_cx()
+}
+
+pub fn current_task_map_new_area(
+    start_vpn: VirtPageNum,
+    end_vpn: VirtPageNum,
+    map_perm: MapPermission,
+) -> isize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.curr_task;
+    let curr_mem_set = &mut inner.tasks[current].memory_set;
+    for vpn in VPNRange::new(start_vpn, end_vpn) {
+        match curr_mem_set.translate(vpn) {
+            Some(pte) if pte.is_valid() => return -1, // mapped already
+            _ => {}
+        }
+    }
+    curr_mem_set.insert_framed_area(start_vpn.into(), end_vpn.into(), map_perm);
+    0
+}
+
+pub fn current_task_unmap_area(start_vpn: VirtPageNum, end_vpn: VirtPageNum) -> isize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.curr_task;
+    let curr_mem_set = &mut inner.tasks[current].memory_set;
+    for vpn in VPNRange::new(start_vpn, end_vpn) {
+        match curr_mem_set.translate(vpn) {
+            Some(pte) if !pte.is_valid() => return -1, // not valid
+            Some(_) => curr_mem_set.page_table_mut().unmap(vpn),
+            _ => return -1, // no entry
+        }
+    }
+    0
 }

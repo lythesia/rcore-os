@@ -45,14 +45,13 @@ __alltraps:
     ld sp, 35*8(sp)
     // switch to kernel space
     csrw satp, t0
-    // TODO 执行了 sfence.vma 之后，GDB就无法继续调试了?
     sfence.vma
     // jump to trap_handler
     // 为什么不能沿用call trap_handler?
     // 本段.text.trampoline和trap_handler在同一个段内, trap_handler的偏移是个固定值, call是伪指令,
     // 会编译成直接跳转这个偏移量; 但实际上trap_handler(我们需要跳转的)的虚地址在最高页内, 并不是这个偏移
     // 得到的地址
-    // TODO 我还有问题, 如果trap_handler的代码都是一样的, 跳转到哪走的逻辑不都是一样?
+    // TODO 我还有问题, 如果trap_handler的代码都是一样的, 跳转到哪走的逻辑不都是一样? 难道会有reloc的问题?
     jr t1
 
 __restore:
@@ -80,14 +79,3 @@ __restore:
     // 直接恢复sp, x[2] -> sp, 即回到user stack
     ld sp, 2*8(sp)
     sret
-
-// __pre_restore必须放在__restore后, 这里__pre是执行逻辑上的__pre, 不是位置上的
-// 因为它只在task第一次运行时执行, 之后都是走__restore(之后的情况是指call trap_handler以后的ra是__restore)
-// __pre_restore:
-//     // 因为sp就是栈顶, 栈顶就是TrapContext, 也是switch_cost需要的参数
-//     mv a0, sp
-//     call switch_cost
-//     // call完需要恢复sp
-//     mv sp, a0
-//     // 必须跳转到__restore进行正常流程
-//     j __restore

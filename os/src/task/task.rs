@@ -26,7 +26,6 @@ pub struct TaskControlBlock {
 
     pub user_time: usize,
     pub kernel_time: usize,
-    // pub syscall_times: [usize; MAX_SYSCALL_NUM],
 }
 
 impl TaskControlBlock {

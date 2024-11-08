@@ -1,4 +1,4 @@
-use crate::{task::*, timer::get_time_ms};
+use crate::{mm, task::*, timer};
 
 /// task exits and submit an exit code
 pub fn sys_exit(exit_code: i32) -> ! {
@@ -13,19 +13,32 @@ pub fn sys_yield() -> isize {
     0
 }
 
-/// get time in ms
-pub fn sys_get_time() -> isize {
-    get_time_ms() as isize
+#[repr(C)]
+#[derive(Debug)]
+pub struct TimeVal {
+    pub sec: usize,
+    pub usec: usize,
 }
 
-// /// get info of current task
-// pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
-//     unsafe {
-//         *ti = TaskInfo {
-//             status: get_current_task_status(),
-//             call: get_current_task_syscall_times(),
-//             time: get_current_task_run_time(),
-//         }
-//     }
-//     0
-// }
+/// get time
+pub fn sys_get_time(ts: *mut TimeVal) -> isize {
+    let us = timer::get_time_us();
+    let dst_vs = mm::translated_byte_buffer(
+        current_user_token(),
+        ts as *const u8,
+        core::mem::size_of::<TimeVal>(),
+    );
+    let ts = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    let ts_ptr = (&ts as *const TimeVal) as *const u8;
+    for (i, dst) in dst_vs.into_iter().enumerate() {
+        let len = dst.len();
+        unsafe {
+            let src = core::slice::from_raw_parts(ts_ptr.wrapping_add(i * len), len);
+            dst.copy_from_slice(src);
+        }
+    }
+    0
+}

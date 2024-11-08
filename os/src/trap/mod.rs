@@ -9,7 +9,6 @@ use riscv::register::{
 use crate::{
     config::{TRAMPOLINE, TRAP_CONTEXT},
     syscall::syscall,
-    task::{current_trap_cx, current_user_token},
 };
 
 mod context;
@@ -45,7 +44,7 @@ pub fn trap_handler() -> ! {
     crate::task::user_time_end();
     // 应用的 Trap 上下文不在内核地址空间，因此我们调用 current_trap_cx 来获取当前应用的 Trap 上下文的可变引用
     // 而不是像之前那样作为参数传入 trap_handler
-    let cx = current_trap_cx();
+    let cx = crate::task::current_trap_cx();
     let scause = scause::read();
     let stval = stval::read();
 
@@ -53,7 +52,6 @@ pub fn trap_handler() -> ! {
         scause::Trap::Exception(Exception::UserEnvCall) => {
             cx.sepc += 4;
             let syscall_id = cx.x[17];
-            // task::current_task_record_syscall(syscall_id);
             cx.x[10] = syscall(syscall_id, [cx.x[10], cx.x[11], cx.x[12]]) as usize;
         }
         scause::Trap::Exception(Exception::StorePageFault)
@@ -89,7 +87,7 @@ pub fn trap_return() -> ! {
     // __restore的参数a0, Trap 上下文在应用地址空间中的虚拟地址
     let trap_cx_ptr = TRAP_CONTEXT;
     // __restore的参数a1, 应用地址空间的 token
-    let user_satp = current_user_token();
+    let user_satp = crate::task::current_user_token();
 
     extern "C" {
         fn __alltraps();
@@ -114,11 +112,11 @@ pub fn trap_return() -> ! {
     }
 }
 
-// #[no_mangle]
-// pub unsafe fn switch_cost(cx: &mut TrapContext) -> &mut TrapContext {
-//     task::SWITCH_TIME_COUNT += timer::get_time_us() - task::SWITCH_TIME_START;
-//     cx
-// }
+#[no_mangle]
+pub unsafe fn pre_trap_return() -> ! {
+    crate::task::SWITCH_TIME_COUNT += crate::timer::get_time_us() - crate::task::SWITCH_TIME_START;
+    trap_return()
+}
 
 #[no_mangle]
 pub fn trap_from_kernel() -> ! {

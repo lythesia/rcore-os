@@ -22,7 +22,7 @@ fn main() -> i32 {
     panic!("Cannot find main!")
 }
 
-use syscall::{sys_exit, sys_get_time, sys_task_info, sys_write, sys_yield};
+use syscall::*;
 
 pub fn write(fd: usize, buf: &[u8]) -> isize {
     sys_write(fd, buf)
@@ -36,8 +36,24 @@ pub fn yield_() -> isize {
     sys_yield()
 }
 
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct TimeVal {
+    pub sec: usize,
+    pub usec: usize,
+}
+impl TimeVal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 pub fn get_time() -> isize {
-    sys_get_time()
+    let ts = &TimeVal::new();
+    match sys_get_time(ts) {
+        0 => ((ts.sec & 0xffff) * 1000 + ts.usec / 1000) as isize,
+        _ => -1,
+    }
 }
 
 pub fn sleep(ms: usize) {
@@ -47,36 +63,10 @@ pub fn sleep(ms: usize) {
     }
 }
 
-// copy from kernel src
-#[derive(Clone, Copy, PartialEq)]
-pub enum TaskStatus {
-    UnInit,
-    Ready,
-    Running,
-    Exited,
+pub fn mmap(start: usize, len: usize, prot: usize) -> isize {
+    sys_mmap(start, len, prot)
 }
 
-const MAX_SYSCALL_NUM: usize = 500;
-#[repr(C)]
-pub struct TaskInfo {
-    /// Task status in it's life cycle
-    pub status: TaskStatus,
-    /// The numbers of syscall called by task
-    pub syscall_times: [usize; MAX_SYSCALL_NUM],
-    /// Total running time of task, which consists of kernel time and user time
-    pub time: usize,
-}
-
-impl TaskInfo {
-    pub fn new() -> Self {
-        Self {
-            status: TaskStatus::UnInit,
-            syscall_times: [0; MAX_SYSCALL_NUM],
-            time: 0,
-        }
-    }
-}
-
-pub fn task_info(ti: &TaskInfo) -> isize {
-    sys_task_info(ti)
+pub fn munmap(start: usize, len: usize) -> isize {
+    sys_munmap(start, len)
 }
