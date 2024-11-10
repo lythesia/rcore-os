@@ -182,4 +182,55 @@ impl TaskControlBlock {
             trap_handler as usize,
         );
     }
+
+    pub fn spawn(self: &Arc<TaskControlBlock>, elf_data: &[u8]) -> Arc<TaskControlBlock> {
+        // load elf and do mappings
+        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        let trap_cx_ppn = memory_set
+            .translate(VirtAddr::from(TRAP_CONTEXT).into())
+            .unwrap()
+            .ppn();
+
+        // alloc pid & kernel stack in kernel space
+        let pid_handle = pid_alloc();
+        let kstack = KernelStack::new(&pid_handle);
+        let kstack_top = kstack.get_top();
+
+        // access inner exclusively
+        let mut parent_inner = self.inner_exclusive_access();
+
+        // construct TCB
+        let task_control_block = Arc::new(Self {
+            pid: pid_handle,
+            kstack,
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    task_status: TaskStatus::Ready,
+                    task_cx: TaskContext::goto_trap_return(kstack_top),
+                    memory_set,
+                    trap_cx_ppn,
+                    base_size: parent_inner.base_size,
+                    parent: Some(Arc::downgrade(self)),
+                    children: Vec::new(),
+                    exit_code: 0,
+                    user_time: 0,
+                    kernel_time: 0,
+                })
+            },
+        });
+        // add to parent
+        parent_inner.children.push(task_control_block.clone());
+
+        // init trap_cx
+        let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
+        *trap_cx = TrapContext::app_init_context(
+            entry_point,
+            user_sp,
+            KERNEL_SPACE.exclusive_access().token(),
+            kstack_top,
+            trap_handler as usize,
+        );
+
+        task_control_block
+    }
 }

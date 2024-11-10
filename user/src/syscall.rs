@@ -13,6 +13,7 @@ pub const SYSCALL_FORK: usize = 220;
 pub const SYSCALL_EXEC: usize = 221;
 pub const SYSCALL_MMAP: usize = 222;
 pub const SYSCALL_WAITPID: usize = 260;
+pub const SYSCALL_SPAWN: usize = 400;
 pub const SYSCALL_HALT: usize = 555;
 
 fn syscall(id: usize, args: [usize; 3]) -> isize {
@@ -89,4 +90,8 @@ pub fn sys_waitpid(pid: isize, xstatus: &mut i32) -> isize {
 
 pub fn sys_halt() -> isize {
     syscall!(SYSCALL_HALT)
+}
+
+pub fn sys_spawn(prog: &str) -> isize {
+    syscall!(SYSCALL_SPAWN, prog.as_ptr() as usize)
 }

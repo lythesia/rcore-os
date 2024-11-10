@@ -133,3 +133,7 @@ pub fn waitpid(pid: usize, exit_code: &mut i32) -> isize {
 pub fn halt() -> isize {
     sys_halt()
 }
+
+pub fn spawn(prog: &str) -> isize {
+    sys_spawn(prog)
+}

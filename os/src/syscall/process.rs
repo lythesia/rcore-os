@@ -52,7 +52,7 @@ pub fn sys_getpid() -> isize {
 pub fn sys_fork() -> isize {
     let current_task = current_task().unwrap();
     let new_task = current_task.fork();
-    let new_pid = new_task.pid.0;
+    let new_pid = new_task.getpid();
     // modify trap context of new_task, because it returns immediately after switching
     let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
     // we do not have to move to next instruction since we have done it before
@@ -110,4 +110,20 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 pub fn sys_halt() -> isize {
     println!("halt ...");
     crate::sbi::shutdown(false);
+}
+
+pub fn sys_spawn(path: *const u8) -> isize {
+    let token = current_user_token();
+    let path = mm::translated_str(token, path);
+    if let Some(elf_data) = get_app_data_by_name(&path) {
+        let current_task = current_task().unwrap();
+        let new_task = current_task.spawn(elf_data);
+        let new_pid = new_task.getpid();
+        add_task(new_task);
+        // parent中获得新进程的pid
+        // child中无意义, 因为上下文已被替换
+        new_pid as isize
+    } else {
+        -1
+    }
 }
