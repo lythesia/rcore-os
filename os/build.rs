@@ -45,6 +45,15 @@ _num_app:
     }
     writeln!(f, "    .quad app_{}_end", apps.len() - 1)?;
 
+    writeln!(
+        f,
+        r#"    .globl _app_names
+_app_names:"#,
+    )?;
+    for app in &apps {
+        writeln!(f, r#"    .string "{}""#, app)?;
+    }
+
     for (i, app) in apps.iter().enumerate() {
         println!("+app_{}: {}", i, app);
         writeln!(
@@ -53,6 +62,7 @@ _num_app:
     .section .data
     .globl app_{0}_start
     .globl app_{0}_end
+    .align 3
 app_{0}_start:
     .incbin "{1}/{2}.elf"
 app_{0}_end:"#,

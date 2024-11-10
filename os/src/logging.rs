@@ -14,7 +14,13 @@ impl Log for NaiveLogger {
             return;
         }
         print_color(
-            format_args!("[{:>5}] {}\n", record.level(), record.args()),
+            format_args!(
+                "[{} {}:{}] {}\n",
+                record.level(),
+                record.file().unwrap_or("??.rs"),
+                record.line().unwrap_or(0),
+                record.args()
+            ),
             color_code_for_level(&record.level()),
         );
     }

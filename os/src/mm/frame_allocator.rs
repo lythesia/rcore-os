@@ -98,12 +98,6 @@ pub struct StackFrameAllocator {
 
 impl StackFrameAllocator {
     pub fn init(&mut self, l: PhysPageNum, r: PhysPageNum) {
-        // log::debug!(
-        //     "[kernel] phys_frames: [{:?}, {:?}) (total = {})",
-        //     l,
-        //     r,
-        //     r.0 - l.0
-        // );
         self.current = l.0;
         self.end = r.0;
     }

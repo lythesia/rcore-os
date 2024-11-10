@@ -53,12 +53,21 @@ impl MapArea {
         // 必须保证页号所包含的范围 >= [start_va, end_va]
         let s = start_va.floor();
         let e = end_va.ceil();
-        // log::debug!("vpn range: [{:?}, {:?}) (total = {})", s, e, e.0 - s.0);
         Self {
             vpn_range: VPNRange::new(s, e),
             data_frames: BTreeMap::new(),
             map_type,
             map_perm,
+        }
+    }
+
+    // how we `fork` user space
+    pub fn from_another(another: &MapArea) -> Self {
+        Self {
+            vpn_range: another.vpn_range.clone(),
+            data_frames: BTreeMap::new(),
+            map_type: another.map_type,
+            map_perm: another.map_perm,
         }
     }
 
@@ -171,7 +180,7 @@ impl MemorySet {
         //     sbss_with_stack as usize, ebss as usize
         // );
 
-        println!("mapping kernel .text section");
+        // println!("mapping kernel .text section");
         memory_set.push(
             MapArea::new(
                 (stext as usize).into(),
@@ -182,7 +191,7 @@ impl MemorySet {
             None,
         );
 
-        println!("mapping kernel .rodata section");
+        // println!("mapping kernel .rodata section");
         memory_set.push(
             MapArea::new(
                 (srodata as usize).into(),
@@ -193,7 +202,7 @@ impl MemorySet {
             None,
         );
 
-        println!("mapping kernel .data section");
+        // println!("mapping kernel .data section");
         memory_set.push(
             MapArea::new(
                 (sdata as usize).into(),
@@ -204,7 +213,7 @@ impl MemorySet {
             None,
         );
 
-        println!("mapping kernel .bss section");
+        // println!("mapping kernel .bss section");
         memory_set.push(
             MapArea::new(
                 (sbss_with_stack as usize).into(),
@@ -215,7 +224,7 @@ impl MemorySet {
             None,
         );
 
-        println!("mapping kernel physical memory");
+        // println!("mapping kernel physical memory");
         memory_set.push(
             MapArea::new(
                 (ekernel as usize).into(),
@@ -234,7 +243,6 @@ impl MemorySet {
         let mut memory_set = Self::new_bare();
 
         // map trampoline
-        // log::info!("elf trampoline");
         memory_set.map_trampoline();
 
         // map program headers of elf, with U flag
@@ -285,11 +293,6 @@ impl MemorySet {
         // guard page
         user_stack_bottom += PAGE_SIZE;
         let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
-        // log::info!(
-        //     "elf user stack: [{:#x}, {:#x})",
-        //     user_stack_bottom,
-        //     user_stack_top
-        // );
         memory_set.push(
             MapArea::new(
                 user_stack_bottom.into(),
@@ -300,7 +303,6 @@ impl MemorySet {
             None,
         );
         // map TrapContext
-        // log::info!("elf trap cx: [{:#x}, {:#x})", TRAP_CONTEXT, TRAMPOLINE);
         memory_set.push(
             MapArea::new(
                 TRAP_CONTEXT.into(),
@@ -316,6 +318,26 @@ impl MemorySet {
             user_stack_top,
             elf.header.pt2.entry_point() as usize,
         )
+    }
+
+    /// how we `fork` user space
+    pub fn from_existed_user(user_space: &MemorySet) -> Self {
+        let mut memory_set = Self::new_bare();
+        // map trampoline
+        memory_set.map_trampoline();
+        // copy
+        for area in &user_space.areas {
+            // map areas
+            let new_area = MapArea::from_another(area);
+            memory_set.push(new_area, None);
+            // copy data
+            for vpn in area.vpn_range {
+                let src = user_space.translate(vpn).unwrap().ppn();
+                let dst = memory_set.translate(vpn).unwrap().ppn();
+                dst.get_bytes_array().copy_from_slice(src.get_bytes_array());
+            }
+        }
+        memory_set
     }
 
     /// Mention that trampoline is not collected by areas.
@@ -377,6 +399,22 @@ impl MemorySet {
 
     pub fn page_table_mut(&mut self) -> &mut PageTable {
         &mut self.page_table
+    }
+
+    pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
+        if let Some((idx, area)) = self
+            .areas
+            .iter_mut()
+            .enumerate()
+            .find(|(_, area)| area.vpn_range.get_start() == start_vpn)
+        {
+            area.unmap(&mut self.page_table);
+            self.areas.remove(idx);
+        }
+    }
+
+    pub fn recycle_data_pages(&mut self) {
+        self.areas.clear();
     }
 }
 

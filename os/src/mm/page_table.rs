@@ -1,7 +1,8 @@
-use alloc::vec;
 use alloc::vec::Vec;
+use alloc::{string::String, vec};
 use bitflags::bitflags;
 
+use super::PhysAddr;
 use super::{
     address::{PhysPageNum, StepByOne, VirtPageNum, PPN_MASK},
     frame_allocator::{frame_alloc, FrameTracker},
@@ -105,6 +106,15 @@ impl PageTable {
         self.find_pte(vpn).map(|pte| pte.clone())
     }
 
+    pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
+        self.find_pte(va.floor()).map(|pte| {
+            let aligned_pa: PhysAddr = pte.ppn().into();
+            let offset = va.page_offset();
+            let pa_usize: usize = aligned_pa.into();
+            (pa_usize + offset).into()
+        })
+    }
+
     /*
         假设完全从empty开始
         1. 首先root_ppn是new的时候产生的, 且分配了一个frame (root_ppn == base)
@@ -118,7 +128,6 @@ impl PageTable {
     */
     fn find_pte_create(&mut self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idx = vpn.indexes();
-        // log::debug!("map -> find_pte_create: vpn = {:?}, idx = {:?}", vpn, idx);
         let mut ppn = self.root_ppn;
         let mut result = None;
 
@@ -133,7 +142,6 @@ impl PageTable {
             // 当 V 为 0 的时候, 表当前指针是一个空指针, 无法走向下一级节, 则创建一个节点
             if !pte.is_valid() {
                 let frame = frame_alloc().unwrap();
-                // log::debug!("idx[{}]={} frame alloc: {:?}", i, idx[i], frame.ppn);
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
                 self.frames.push(frame);
             }
@@ -171,7 +179,6 @@ impl PageTable {
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
-        // log::debug!("map: vpn = {:?}, flags = {:?}", vpn, flags);
     }
 
     /// remove kv
@@ -182,6 +189,7 @@ impl PageTable {
     }
 }
 
+/// translate buffer of `[ptr, ptr+len]` in `token` space
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
     let page_table = PageTable::from_token(token);
     let mut start = ptr as usize;
@@ -208,4 +216,39 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         start = end_va.into();
     }
     v
+}
+
+/// translate str of `ptr`(read until '\0') in `token` space
+pub fn translated_str(token: usize, ptr: *const u8) -> String {
+    let page_table = PageTable::from_token(token);
+    let mut start_va = VirtAddr::from(ptr as usize);
+    let mut vpn = start_va.floor();
+    let mut s = String::new();
+    loop {
+        let ppn = page_table.translate(vpn).unwrap().ppn();
+        let bytes = &ppn.get_bytes_array()[start_va.page_offset()..];
+        let slice = match bytes.split_once(|&c| c == 0) {
+            Some((v, _)) => v,
+            _ => bytes,
+        };
+        s.push_str(core::str::from_utf8(slice).unwrap());
+
+        if slice.len() < bytes.len() {
+            break;
+        }
+        vpn.step();
+        start_va = vpn.into();
+    }
+    s
+}
+
+/// for primitive values only
+// Q: https://github.com/rcore-os/rCore-Tutorial-Book-v3/issues/55#issuecomment-1568718900
+// A: compiler保证这些值的地址是aligned, 即不会cross page boundary
+// see https://github.com/rcore-os/rCore-Tutorial-v3/pull/80
+pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
+    let page_table = PageTable::from_token(token);
+    let va = VirtAddr::from(ptr as usize);
+    let pa = page_table.translate_va(va).unwrap();
+    pa.get_mut()
 }

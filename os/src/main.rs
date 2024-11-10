@@ -2,6 +2,7 @@
 #![no_std]
 #![feature(array_windows)]
 #![feature(alloc_error_handler)]
+#![feature(slice_split_once)]
 
 extern crate alloc;
 extern crate bitflags;
@@ -16,7 +17,6 @@ mod loader;
 mod logging;
 mod mm;
 mod sbi;
-mod stack_trace;
 mod sync;
 mod syscall;
 mod task;
@@ -89,16 +89,17 @@ pub fn rust_main() -> ! {
         config::MEMORY_END,
     );
 
-    log::info!("[kernel] hello!");
     mm::init();
-    log::info!("[kernel] back to world!");
     mm::remap_test();
+
+    task::add_initproc();
 
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
 
-    task::run_first_task();
+    loader::list_apps();
+    task::run_tasks();
     panic!("Unreachable in rust_main!");
 }
 

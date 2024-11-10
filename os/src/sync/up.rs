@@ -15,6 +15,8 @@ impl<T> UPSafeCell<T> {
 
     pub fn exclusive_access(&self) -> RefMut<'_, T> {
         // Panics if the value is currently borrowed
-        self.inner.borrow_mut()
+        self.inner
+            .try_borrow_mut()
+            .expect(core::any::type_name::<T>())
     }
 }

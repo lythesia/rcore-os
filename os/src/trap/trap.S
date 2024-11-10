@@ -51,7 +51,9 @@ __alltraps:
     // 本段.text.trampoline和trap_handler在同一个段内, trap_handler的偏移是个固定值, call是伪指令,
     // 会编译成直接跳转这个偏移量; 但实际上trap_handler(我们需要跳转的)的虚地址在最高页内, 并不是这个偏移
     // 得到的地址
-    // TODO 我还有问题, 如果trap_handler的代码都是一样的, 跳转到哪走的逻辑不都是一样? 难道会有reloc的问题?
+    // Q: 我还有问题, 如果trap_handler的代码都是一样的, 跳转到哪走的逻辑不都是一样?
+    // A: 注意jr上面的两条指令是切换地址空间, 如果使用call (== pc + offset), 那么切换换地址空间以后,
+    // pc + offset还是trap_handler吗? 显然不是了
     jr t1
 
 __restore:

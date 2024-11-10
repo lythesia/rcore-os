@@ -15,8 +15,13 @@ ifeq ($(MODE), release)
 	MODE_ARG := --release
 endif
 
+TEST ?=
+
 elf: $(APPS)
 	@cargo build $(MODE_ARG)
+ifeq ($(TEST), 1)
+	@cp $(TARGET_DIR)/usertests $(TARGET_DIR)/initproc
+endif
 
 binary: elf
 	@$(foreach elf, $(ELFS), \
@@ -29,7 +34,7 @@ pre:
 	@mkdir -p $(BUILD_DIR)/app
 	@$(foreach t, $(APPS), cp $(t) $(BUILD_DIR)/app/;)
 
-build: clean pre binary
+build: pre binary
 	@$(foreach t, $(ELFS), cp $(t).bin $(BUILD_DIR)/bin/;)
 	@$(foreach t, $(ELFS), cp $(t).elf $(BUILD_DIR)/elf/;)
 

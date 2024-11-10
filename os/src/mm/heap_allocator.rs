@@ -15,12 +15,6 @@ pub fn handle_alloc_error(layout: core::alloc::Layout) -> ! {
 
 pub fn init_heap() {
     let start = unsafe { HEAP_SPACE.as_ptr() as usize };
-    log::info!(
-        "[kernel] {:<10} [{:#x}, {:#x})",
-        "heap",
-        start,
-        start + KERNEL_HEAP_SIZE
-    );
     unsafe {
         HEAP_ALLOCATOR.lock().init(start, KERNEL_HEAP_SIZE);
     }

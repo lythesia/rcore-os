@@ -41,27 +41,40 @@ pub fn enable_timer_interrupt() {
 #[no_mangle]
 /// handle an interrupt, exception, or system call from user space
 pub fn trap_handler() -> ! {
+    set_kernel_trap_entry();
     crate::task::user_time_end();
-    // 应用的 Trap 上下文不在内核地址空间，因此我们调用 current_trap_cx 来获取当前应用的 Trap 上下文的可变引用
-    // 而不是像之前那样作为参数传入 trap_handler
-    let cx = crate::task::current_trap_cx();
     let scause = scause::read();
     let stval = stval::read();
 
     match scause.cause() {
         scause::Trap::Exception(Exception::UserEnvCall) => {
+            // 应用的 Trap 上下文不在内核地址空间，因此我们调用 current_trap_cx 来获取当前应用的 Trap 上下文的可变引用
+            // 而不是像之前那样作为参数传入 trap_handler
+            let cx = crate::task::current_trap_cx();
             cx.sepc += 4;
-            let syscall_id = cx.x[17];
-            cx.x[10] = syscall(syscall_id, [cx.x[10], cx.x[11], cx.x[12]]) as usize;
+            let ret = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]);
+            // cx is changed during sys_exec, so we have to call it again
+            let cx = crate::task::current_trap_cx();
+            cx.x[10] = ret as usize;
         }
-        scause::Trap::Exception(Exception::StorePageFault)
+        scause::Trap::Exception(Exception::StoreFault)
+        | scause::Trap::Exception(Exception::LoadFault)
+        | scause::Trap::Exception(Exception::InstructionFault)
+        | scause::Trap::Exception(Exception::InstructionPageFault)
+        | scause::Trap::Exception(Exception::StorePageFault)
         | scause::Trap::Exception(Exception::LoadPageFault) => {
-            log::error!("[kernel] PageFault in application, kernel killed it.");
-            crate::task::exit_current_and_run_next();
+            log::error!("[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
+                scause.cause(),
+                stval,
+                crate::task::current_trap_cx().sepc
+            );
+            // page fault exit code
+            crate::task::exit_current_and_run_next(-2);
         }
         scause::Trap::Exception(Exception::IllegalInstruction) => {
-            log::error!("[kernel] IllegalInstruction in application, kernel killed it.");
-            crate::task::exit_current_and_run_next();
+            log::error!("[kernel] IllegalInstruction in application, core dumped.");
+            // illegal instruction exit code
+            crate::task::exit_current_and_run_next(-3);
         }
         scause::Trap::Interrupt(Interrupt::SupervisorTimer) => {
             crate::timer::set_next_trigger();
@@ -110,12 +123,6 @@ pub fn trap_return() -> ! {
             options(noreturn)
         );
     }
-}
-
-#[no_mangle]
-pub unsafe fn pre_trap_return() -> ! {
-    crate::task::SWITCH_TIME_COUNT += crate::timer::get_time_us() - crate::task::SWITCH_TIME_START;
-    trap_return()
 }
 
 #[no_mangle]

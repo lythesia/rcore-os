@@ -7,7 +7,7 @@
 
 // s_i <- a0[8*(i+2)]
 .macro LOAD_SN n
-    ld s\n, (\n + 2)*8(a0)
+    ld s\n, (\n + 2)*8(a1) // OMG!
 .endm
 
 .section .text
