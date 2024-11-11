@@ -6,7 +6,7 @@ use alloc::{
 };
 
 use crate::{
-    config::TRAP_CONTEXT,
+    config::{self, TRAP_CONTEXT},
     mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE},
     sync::UPSafeCell,
     trap::{trap_handler, TrapContext},
@@ -47,6 +47,11 @@ pub struct TaskControlBlockInner {
     // time stats
     pub user_time: usize,
     pub kernel_time: usize,
+
+    // stride
+    // https://nankai.gitbook.io/ucore-os-on-risc-v64/lab6/tiao-du-suan-fa-kuang-jia#stride-suan-fa
+    pub stride: u64,
+    pub prio: u64,
 }
 
 impl TaskControlBlockInner {
@@ -64,6 +69,10 @@ impl TaskControlBlockInner {
 
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+
+    pub fn stride_step(&mut self) {
+        self.stride = self.stride.wrapping_add(config::STRIDE_MAX / self.prio);
     }
 }
 
@@ -95,6 +104,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     user_time: 0,
                     kernel_time: 0,
+                    stride: 0,
+                    prio: 16,
                 })
             },
         };
@@ -147,6 +158,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     user_time: 0,
                     kernel_time: 0,
+                    stride: 0,
+                    prio: 16,
                 })
             },
         });
@@ -215,6 +228,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     user_time: 0,
                     kernel_time: 0,
+                    stride: 0,
+                    prio: 16,
                 })
             },
         });

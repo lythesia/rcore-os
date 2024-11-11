@@ -6,6 +6,7 @@ pub const SYSCALL_READ: usize = 63;
 pub const SYSCALL_WRITE: usize = 64;
 pub const SYSCALL_EXIT: usize = 93;
 pub const SYSCALL_YIELD: usize = 124;
+pub const SYSCALL_SET_PRIORITY: usize = 140;
 pub const SYSCALL_GET_TIME: usize = 169;
 pub const SYSCALL_GETPID: usize = 172;
 pub const SYSCALL_MUNMAP: usize = 215;
@@ -94,4 +95,8 @@ pub fn sys_halt() -> isize {
 
 pub fn sys_spawn(prog: &str) -> isize {
     syscall!(SYSCALL_SPAWN, prog.as_ptr() as usize)
+}
+
+pub fn sys_set_priority(prio: isize) -> isize {
+    syscall!(SYSCALL_SET_PRIORITY, prio as usize)
 }

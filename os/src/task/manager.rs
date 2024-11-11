@@ -1,4 +1,6 @@
-use alloc::{collections::vec_deque::VecDeque, sync::Arc};
+use core::cmp::Reverse;
+
+use alloc::{collections::binary_heap::BinaryHeap, sync::Arc};
 use lazy_static::lazy_static;
 
 use crate::sync::UPSafeCell;
@@ -10,25 +12,49 @@ lazy_static! {
         unsafe { UPSafeCell::new(TaskManager::new()) };
 }
 
+// (stride, Arc)
+struct StridedArcTask(u64, Arc<TaskControlBlock>);
+impl Ord for StridedArcTask {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        (self.0.wrapping_sub(other.0) as i64).cmp(&0i64)
+    }
+}
+impl PartialOrd for StridedArcTask {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl PartialEq for StridedArcTask {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+impl Eq for StridedArcTask {}
+
 pub struct TaskManager {
-    /// 使用Arc而非TCB本身, 因为经常需要被放入/取出, 拷贝开销较大, 故使用Arc指针; 其次Arc共享更方便
-    ready_queue: VecDeque<Arc<TaskControlBlock>>,
+    ready_queue: BinaryHeap<Reverse<StridedArcTask>>,
 }
 
 /// A simple FIFO scheduler.
 impl TaskManager {
     pub fn new() -> Self {
         Self {
-            ready_queue: VecDeque::new(),
+            ready_queue: BinaryHeap::new(),
         }
     }
 
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
-        self.ready_queue.push_back(task);
+        let stride = task.inner_exclusive_access().stride;
+        self.ready_queue.push(Reverse(StridedArcTask(stride, task)));
     }
 
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        self.ready_queue
+            .pop()
+            .map(|Reverse(StridedArcTask(_, task))| {
+                task.inner_exclusive_access().stride_step();
+                task
+            })
     }
 }
 

@@ -137,3 +137,7 @@ pub fn halt() -> isize {
 pub fn spawn(prog: &str) -> isize {
     sys_spawn(prog)
 }
+
+pub fn set_priority(prio: isize) -> isize {
+    sys_set_priority(prio)
+}
