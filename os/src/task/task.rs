@@ -1,12 +1,15 @@
 use core::cell::RefMut;
 
+use alloc::vec;
 use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
 
+use crate::fs::{Stdin, Stdout};
 use crate::{
     config::TRAP_CONTEXT,
+    fs::File,
     mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE},
     sync::UPSafeCell,
     trap::{trap_handler, TrapContext},
@@ -43,6 +46,7 @@ pub struct TaskControlBlockInner {
     pub parent: Option<Weak<TaskControlBlock>>,
     pub children: Vec<Arc<TaskControlBlock>>,
     pub exit_code: i32,
+    pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
 
     // time stats
     pub user_time: usize,
@@ -64,6 +68,16 @@ impl TaskControlBlockInner {
 
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+
+    pub fn alloc_fd(&mut self) -> usize {
+        match self.fd_table.iter().position(Option::is_none) {
+            Some(fd) => fd,
+            _ => {
+                self.fd_table.push(None);
+                self.fd_table.len() - 1
+            }
+        }
     }
 }
 
@@ -93,6 +107,14 @@ impl TaskControlBlock {
                     parent: None,
                     children: Vec::new(),
                     exit_code: 0,
+                    fd_table: vec![
+                        // 0 -> stdin
+                        Some(Arc::new(Stdin)),
+                        // 1 -> stdout
+                        Some(Arc::new(Stdout)),
+                        // 2 -> stderr
+                        Some(Arc::new(Stdout)),
+                    ],
                     user_time: 0,
                     kernel_time: 0,
                 })
@@ -131,6 +153,16 @@ impl TaskControlBlock {
         let pid_handle = pid_alloc();
         let kstack = KernelStack::new(&pid_handle);
         let kstack_top = kstack.get_top();
+        // copy fd table
+        // todo: how 'bout `fd_table.clone()`?
+        let mut new_fd_table = Vec::new();
+        for fd in parent_inner.fd_table.iter() {
+            if let Some(file) = fd {
+                new_fd_table.push(Some(file.clone()));
+            } else {
+                new_fd_table.push(None);
+            }
+        }
         // construct TCB
         let task_control_block = Arc::new(Self {
             pid: pid_handle,
@@ -144,6 +176,7 @@ impl TaskControlBlock {
                     base_size: parent_inner.base_size,
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
+                    fd_table: new_fd_table,
                     exit_code: 0,
                     user_time: 0,
                     kernel_time: 0,

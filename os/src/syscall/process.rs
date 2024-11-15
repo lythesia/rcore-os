@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use crate::{loader::get_app_data_by_name, mm, task::*, timer};
+use crate::{fs, mm, task::*, timer};
 
 /// task exits and submit an exit code
 pub fn sys_exit(exit_code: i32) -> ! {
@@ -65,7 +65,8 @@ pub fn sys_fork() -> isize {
 pub fn sys_exec(path: *const u8) -> isize {
     let token = current_user_token();
     let path = mm::translated_str(token, path);
-    if let Some(elf_data) = get_app_data_by_name(&path) {
+    if let Some(elf_inode) = fs::open_file(&path, fs::OpenFlags::RDONLY) {
+        let elf_data = &elf_inode.read_all();
         let task = current_task().unwrap();
         task.exec(elf_data);
         // 这个返回值其实并没有意义, 因为我们在替换地址空间的时候本来就对 Trap 上下文重新进行了初始化

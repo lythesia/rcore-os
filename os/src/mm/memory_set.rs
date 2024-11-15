@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 use riscv::register::satp;
 
 use crate::{
-    config::{MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE},
+    config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE},
     mm::address::StepByOne,
     sync::UPSafeCell,
 };
@@ -20,6 +20,10 @@ use super::{
 lazy_static! {
     pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
+}
+
+pub fn kernel_token() -> usize {
+    KERNEL_SPACE.exclusive_access().token()
 }
 
 extern "C" {
@@ -234,6 +238,20 @@ impl MemorySet {
             ),
             None,
         );
+
+        // println!("mapping memory-mapped registers");
+        for &(start, size) in MMIO {
+            memory_set.push(
+                MapArea::new(
+                    start.into(),
+                    (start + size).into(),
+                    MapType::Identical,
+                    MapPermission::R | MapPermission::W,
+                ),
+                None,
+            );
+        }
+
         memory_set
     }
 

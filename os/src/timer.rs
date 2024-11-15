@@ -12,6 +12,7 @@ pub fn get_time() -> usize {
 }
 
 /// get current time in ms
+#[allow(unused)]
 pub fn get_time_ms() -> usize {
     time::read() / (CLOCK_FREQ / MS_PER_SEC)
 }

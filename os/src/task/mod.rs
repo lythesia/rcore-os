@@ -3,7 +3,7 @@ use context::TaskContext;
 use lazy_static::lazy_static;
 use task::{TaskControlBlock, TaskStatus};
 
-use crate::loader::get_app_data_by_name;
+use crate::fs;
 
 mod context;
 mod manager;
@@ -20,9 +20,11 @@ pub use processor::{
 };
 
 lazy_static! {
-    pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new(TaskControlBlock::new(
-        get_app_data_by_name("initproc").unwrap()
-    ));
+    pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new({
+        let inode = fs::open_file("initproc", fs::OpenFlags::RDONLY).unwrap();
+        let elf = inode.read_all();
+        TaskControlBlock::new(&elf)
+    });
 }
 
 pub fn suspend_current_and_run_next() {

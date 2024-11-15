@@ -252,3 +252,57 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
     let pa = page_table.translate_va(va).unwrap();
     pa.get_mut()
 }
+
+/// Array of u8 slice that user communicate with os
+pub struct UserBuffer {
+    pub buffers: Vec<&'static mut [u8]>,
+}
+impl UserBuffer {
+    pub fn new(buffers: Vec<&'static mut [u8]>) -> Self {
+        Self { buffers }
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffers.iter().map(|b| b.len()).sum()
+    }
+}
+
+pub struct UserBufferIterator {
+    buffers: Vec<&'static mut [u8]>,
+    curr_buf: usize,
+    pos_in_buf: usize,
+}
+
+impl IntoIterator for UserBuffer {
+    type Item = *mut u8;
+
+    type IntoIter = UserBufferIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        UserBufferIterator {
+            buffers: self.buffers,
+            curr_buf: 0,
+            pos_in_buf: 0,
+        }
+    }
+}
+
+impl Iterator for UserBufferIterator {
+    type Item = *mut u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.curr_buf >= self.buffers.len() {
+            return None;
+        }
+
+        let r = &mut self.buffers[self.curr_buf][self.pos_in_buf] as *mut _;
+        // last in curr_buf
+        if self.pos_in_buf + 1 == self.buffers[self.curr_buf].len() {
+            self.pos_in_buf = 0;
+            self.curr_buf += 1;
+        } else {
+            self.pos_in_buf += 1;
+        }
+        Some(r)
+    }
+}

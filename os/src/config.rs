@@ -1,8 +1,6 @@
 //! Constants used in rCore
 
-// pub const MAX_SYSCALL_NUM: usize = 500;
-
-pub use crate::board::{CLOCK_FREQ, MEMORY_END};
+pub use crate::board::{CLOCK_FREQ, MEMORY_END, MMIO};
 
 // Memory
 pub const USER_STACK_SIZE: usize = 4096 * 2;

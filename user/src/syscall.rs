@@ -2,6 +2,8 @@ use core::arch::asm;
 
 use crate::TimeVal;
 
+pub const SYSCALL_OPEN: usize = 56;
+pub const SYSCALL_CLOSE: usize = 57;
 pub const SYSCALL_READ: usize = 63;
 pub const SYSCALL_WRITE: usize = 64;
 pub const SYSCALL_EXIT: usize = 93;
@@ -41,6 +43,14 @@ macro_rules! syscall {
     ($id:expr, $a0:expr, $a1:expr, $a2:expr) => {
         syscall($id, [$a0, $a1, $a2])
     };
+}
+
+pub fn sys_open(path: &str, flags: u32) -> isize {
+    syscall!(SYSCALL_OPEN, path.as_ptr() as usize, flags as usize)
+}
+
+pub fn sys_close(fd: usize) -> isize {
+    syscall!(SYSCALL_CLOSE, fd)
 }
 
 pub fn sys_read(fd: usize, buf: &mut [u8]) -> isize {

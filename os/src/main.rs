@@ -12,21 +12,20 @@ mod board;
 mod config;
 #[macro_use]
 mod console;
+mod drivers;
+mod fs;
 mod lang_item;
-mod loader;
 mod logging;
 mod mm;
 mod sbi;
 mod sync;
 mod syscall;
 mod task;
-#[allow(unused)]
 mod timer;
 mod trap;
 
 use core::arch::global_asm;
 global_asm!(include_str!("entry.asm"));
-global_asm!(include_str!("link_app.S"));
 
 extern "C" {
     fn stext();
@@ -98,7 +97,7 @@ pub fn rust_main() -> ! {
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
 
-    loader::list_apps();
+    fs::list_apps();
     task::run_tasks();
     panic!("Unreachable in rust_main!");
 }
