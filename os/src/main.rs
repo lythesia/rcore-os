@@ -3,12 +3,14 @@
 #![feature(array_windows)]
 #![feature(alloc_error_handler)]
 #![feature(slice_split_once)]
+#![feature(trait_upcasting)]
 
 extern crate alloc;
 extern crate bitflags;
 
 #[path = "boards/qemu.rs"]
 mod board;
+mod cast;
 mod config;
 #[macro_use]
 mod console;

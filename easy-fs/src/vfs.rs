@@ -10,6 +10,8 @@ use crate::{
 
 /// Virtual filesystem layer over easy-fs
 pub struct Inode {
+    inode_id: u32,
+
     // indicate which `DiskInode` is mapping
     block_id: usize,
     block_offset: usize,
@@ -21,12 +23,14 @@ pub struct Inode {
 impl Inode {
     /// Create a vfs inode
     pub fn new(
+        inode_id: u32,
         block_id: u32,
         block_offset: usize,
         fs: Arc<Mutex<EasyFileSystem>>,
         block_device: Arc<dyn BlockDevice>,
     ) -> Self {
         Self {
+            inode_id,
             block_id: block_id as usize,
             block_offset,
             fs,
@@ -73,6 +77,7 @@ impl Inode {
             self.find_inode_id(name, disk_inode).map(|inode_id| {
                 let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
                 Arc::new(Inode::new(
+                    inode_id,
                     block_id,
                     block_offset,
                     self.fs.clone(),
@@ -108,7 +113,7 @@ impl Inode {
         disk_inode: &mut DiskInode,
         fs: &mut MutexGuard<EasyFileSystem>,
     ) {
-        if new_size < disk_inode.size {
+        if new_size <= disk_inode.size {
             return;
         }
 
@@ -160,6 +165,7 @@ impl Inode {
         // 4. return inode
         block_cache_sync_all();
         Some(Arc::new(Self::new(
+            new_inode_id,
             new_inode_block_id,
             new_inode_block_offset,
             self.fs.clone(),
@@ -198,5 +204,15 @@ impl Inode {
             self.increase_size((offset + buf.len()) as u32, disk_inode, &mut fs);
             disk_inode.write_at(offset, buf, &self.block_device)
         })
+    }
+
+    /// Get inode id
+    pub fn inode_id(&self) -> u32 {
+        self.inode_id
+    }
+
+    /// Get data size of inode
+    pub fn get_size(&self) -> usize {
+        self.read_disk_inode(|disk_inode| disk_inode.size as usize)
     }
 }

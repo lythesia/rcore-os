@@ -73,8 +73,16 @@ pub fn sys_get_time(ts: &TimeVal) -> isize {
     syscall!(SYSCALL_GET_TIME, ts as *const _ as usize)
 }
 
-pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
-    syscall!(SYSCALL_MMAP, start, len, prot)
+pub fn sys_mmap(
+    start: usize,
+    len: usize,
+    prot: usize,
+    flags: usize,
+    fd: usize,
+    offset: usize,
+) -> isize {
+    let packed_args = [prot, flags, fd, offset];
+    syscall!(SYSCALL_MMAP, start, len, packed_args.as_ptr() as usize)
 }
 
 pub fn sys_munmap(start: usize, len: usize) -> isize {

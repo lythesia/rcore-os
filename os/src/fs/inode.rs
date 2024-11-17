@@ -41,6 +41,29 @@ impl OSInode {
         }
         v
     }
+
+    #[allow(unused)]
+    pub fn is_dir(&self) -> bool {
+        self.inner
+            .exclusive_access()
+            .inode
+            .read_disk_inode(|disk_inode| disk_inode.is_dir())
+    }
+
+    pub fn is_file(&self) -> bool {
+        self.inner
+            .exclusive_access()
+            .inode
+            .read_disk_inode(|disk_inode| disk_inode.is_file())
+    }
+
+    pub fn clone_inner_inode(&self) -> Arc<Inode> {
+        self.inner.exclusive_access().inode.clone()
+    }
+
+    pub fn copy(&self) -> Self {
+        Self::new(self.readable, self.writable, self.clone_inner_inode())
+    }
 }
 
 lazy_static! {

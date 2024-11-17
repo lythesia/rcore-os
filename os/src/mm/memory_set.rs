@@ -410,13 +410,9 @@ impl MemorySet {
         );
     }
 
-    /// Delegate to page_table
+    /// Delegate `token()` to page_table
     pub fn token(&self) -> usize {
         self.page_table.token()
-    }
-
-    pub fn page_table_mut(&mut self) -> &mut PageTable {
-        &mut self.page_table
     }
 
     pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
@@ -433,6 +429,17 @@ impl MemorySet {
 
     pub fn recycle_data_pages(&mut self) {
         self.areas.clear();
+    }
+
+    /// Delegate `map()` to page_table
+    pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, map_perm: MapPermission) {
+        let pte_flags = PTEFlags::from_bits_truncate(map_perm.bits);
+        self.page_table.map(vpn, ppn, pte_flags);
+    }
+
+    /// Delegate `unmap()` to page_table
+    pub fn unmap(&mut self, vpn: VirtPageNum) {
+        self.page_table.unmap(vpn);
     }
 }
 

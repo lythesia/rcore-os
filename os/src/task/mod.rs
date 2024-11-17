@@ -18,6 +18,7 @@ pub use mem::*;
 pub use processor::{
     current_task, current_trap_cx, current_user_token, run_tasks, user_time_end, user_time_start,
 };
+pub use task::{FileMapping, MMapReserve, MapRange};
 
 lazy_static! {
     pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new({
@@ -78,6 +79,10 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     task_inner.children.clear();
     // deallocate user space
     task_inner.memory_set.recycle_data_pages();
+    // write back dirty pages
+    for mapping in &task_inner.file_mappings {
+        mapping.sync();
+    }
     drop(task_inner);
 
     // drop task manually to maintain rc correctly

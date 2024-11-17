@@ -56,6 +56,7 @@ bitflags! {
 }
 
 pub fn open(path: &str, flags: OpenFlags) -> isize {
+    assert!(path.ends_with('\0'));
     sys_open(path, flags.bits)
 }
 
@@ -106,8 +107,23 @@ pub fn sleep(ms: usize) {
     }
 }
 
-pub fn mmap(start: usize, len: usize, prot: usize) -> isize {
-    sys_mmap(start, len, prot)
+bitflags! {
+    pub struct MMapFlags: u32 {
+        const MAP_ANON = 0;
+        const MAP_FILE = 1 << 0;
+        const MAP_FIXED = 1 << 1;
+    }
+}
+
+pub fn mmap(
+    start: usize,
+    len: usize,
+    prot: usize,
+    flags: MMapFlags,
+    fd: usize,
+    offset: usize,
+) -> isize {
+    sys_mmap(start, len, prot, flags.bits as usize, fd, offset)
 }
 
 pub fn munmap(start: usize, len: usize) -> isize {

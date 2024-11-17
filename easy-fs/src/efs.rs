@@ -125,6 +125,7 @@ impl EasyFileSystem {
         drop(guard);
 
         Inode::new(
+            0,
             root_inode_block_id,
             root_inode_offset,
             efs.clone(),

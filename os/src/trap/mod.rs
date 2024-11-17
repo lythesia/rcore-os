@@ -63,13 +63,15 @@ pub fn trap_handler() -> ! {
         | scause::Trap::Exception(Exception::InstructionPageFault)
         | scause::Trap::Exception(Exception::StorePageFault)
         | scause::Trap::Exception(Exception::LoadPageFault) => {
-            log::error!("[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
-                scause.cause(),
-                stval,
-                crate::task::current_trap_cx().sepc
-            );
-            // page fault exit code
-            crate::task::exit_current_and_run_next(-2);
+            if !crate::task::handle_page_fault(stval) {
+                log::error!("[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
+                    scause.cause(),
+                    stval,
+                    crate::task::current_trap_cx().sepc
+                );
+                // page fault exit code
+                crate::task::exit_current_and_run_next(-2);
+            }
         }
         scause::Trap::Exception(Exception::IllegalInstruction) => {
             log::error!("[kernel] IllegalInstruction in application, core dumped.");

@@ -73,6 +73,10 @@ impl PageTableEntry {
     pub fn executable(&self) -> bool {
         self.flags().contains(PTEFlags::X)
     }
+
+    pub fn is_dirty(&self) -> bool {
+        self.flags().contains(PTEFlags::D)
+    }
 }
 
 pub struct PageTable {

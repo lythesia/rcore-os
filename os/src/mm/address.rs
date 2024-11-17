@@ -220,13 +220,21 @@ impl StepByOne for VirtPageNum {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct SimpleRange<T>
 where
     T: StepByOne + Copy + Debug + PartialEq + PartialOrd,
 {
     l: T,
     r: T,
+}
+impl<T> Debug for SimpleRange<T>
+where
+    T: StepByOne + Copy + Debug + PartialEq + PartialOrd,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "[{:?}, {:?})", self.l, self.r)
+    }
 }
 
 impl<T> SimpleRange<T>
@@ -244,6 +252,21 @@ where
 
     pub fn get_end(&self) -> T {
         self.r
+    }
+
+    pub fn contains(&self, v: impl Into<T>) -> bool {
+        let vpn: T = v.into();
+        self.l <= vpn && vpn < self.r // r excluded
+    }
+
+    pub fn overlap_with(&self, other: &Self) -> bool {
+        // coz rhs is excluded, we must make lhs+1 when comparing
+        let mut other_l = other.get_start();
+        other_l.step();
+        let mut self_l = self.l.clone();
+        self_l.step();
+
+        self.r >= other_l && other.get_end() >= self_l
     }
 }
 
