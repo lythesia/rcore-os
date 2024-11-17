@@ -62,7 +62,17 @@ impl OSInode {
     }
 
     pub fn copy(&self) -> Self {
-        Self::new(self.readable, self.writable, self.clone_inner_inode())
+        let inner = self.inner.exclusive_access();
+        Self {
+            readable: self.readable,
+            writable: self.writable,
+            inner: unsafe {
+                UPSafeCell::new(OSInodeInner {
+                    offset: inner.offset,
+                    inode: inner.inode.clone(),
+                })
+            },
+        }
     }
 }
 
