@@ -55,9 +55,15 @@ bitflags! {
     }
 }
 
+const AT_FDCWD: isize = -100;
 pub fn open(path: &str, flags: OpenFlags) -> isize {
     assert!(path.ends_with('\0'));
-    sys_open(path, flags.bits)
+    sys_openat(AT_FDCWD, path, flags.bits)
+}
+
+pub fn openat(fd: usize, path: &str, flags: OpenFlags) -> isize {
+    assert!(path.ends_with('\0'));
+    sys_openat(fd as isize, path, flags.bits)
 }
 
 pub fn close(fd: usize) -> isize {
@@ -166,4 +172,23 @@ pub fn waitpid(pid: usize, exit_code: &mut i32) -> isize {
 
 pub fn halt() -> isize {
     sys_halt()
+}
+
+pub fn getcwd(path: &mut [u8]) -> isize {
+    sys_getcwd(path)
+}
+
+pub fn mkdir(path: &str) -> isize {
+    assert!(path.ends_with('\0'));
+    sys_mkdirat(AT_FDCWD, path)
+}
+
+pub fn mkdirat(fd: usize, path: &str) -> isize {
+    assert!(path.ends_with('\0'));
+    sys_mkdirat(fd as isize, path)
+}
+
+pub fn chdir(path: &str) -> isize {
+    assert!(path.ends_with('\0'));
+    sys_chdir(path)
 }

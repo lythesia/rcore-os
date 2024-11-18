@@ -10,7 +10,7 @@ use easy_fs::Inode;
 
 use crate::cast::DowncastArc;
 use crate::config::{MMAP_AREA_BASE, PAGE_SIZE};
-use crate::fs::{OSInode, Stdin, Stdout};
+use crate::fs::{OSInode, Stdin, Stdout, ROOT_INODE};
 use crate::mm::{frame_alloc, FrameTracker, MapPermission, PageTable, VPNRange, VirtPageNum};
 use crate::{
     config::TRAP_CONTEXT,
@@ -58,6 +58,9 @@ pub struct TaskControlBlockInner {
     pub mmap_mapped: Vec<MMapReserve>,
     pub mmap_va_allocator: VirtAddressAllocator,
     pub file_mappings: Vec<FileMapping>,
+
+    // cwd
+    pub cwd: Arc<Inode>,
 
     // time stats
     pub user_time: usize,
@@ -359,6 +362,7 @@ impl TaskControlBlock {
                     mmap_mapped: Vec::new(),
                     mmap_va_allocator: VirtAddressAllocator::new(MMAP_AREA_BASE),
                     file_mappings: Vec::new(),
+                    cwd: ROOT_INODE.clone(),
                     user_time: 0,
                     kernel_time: 0,
                 })
@@ -433,6 +437,7 @@ impl TaskControlBlock {
                     mmap_mapped: parent_inner.mmap_mapped.clone(),
                     mmap_va_allocator: parent_inner.mmap_va_allocator.clone(),
                     file_mappings,
+                    cwd: parent_inner.cwd.clone(),
                     user_time: 0,
                     kernel_time: 0,
                 })

@@ -99,7 +99,7 @@ pub fn rust_main() -> ! {
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
 
-    fs::list_apps();
+    fs::ls_root();
     task::run_tasks();
     panic!("Unreachable in rust_main!");
 }

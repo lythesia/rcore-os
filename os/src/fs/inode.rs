@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
 use easy_fs::{EasyFileSystem, Inode};
 use lazy_static::lazy_static;
@@ -42,19 +42,12 @@ impl OSInode {
         v
     }
 
-    #[allow(unused)]
     pub fn is_dir(&self) -> bool {
-        self.inner
-            .exclusive_access()
-            .inode
-            .read_disk_inode(|disk_inode| disk_inode.is_dir())
+        self.inner.exclusive_access().inode.is_dir()
     }
 
     pub fn is_file(&self) -> bool {
-        self.inner
-            .exclusive_access()
-            .inode
-            .read_disk_inode(|disk_inode| disk_inode.is_file())
+        self.inner.exclusive_access().inode.is_file()
     }
 
     pub fn clone_inner_inode(&self) -> Arc<Inode> {
@@ -84,8 +77,8 @@ lazy_static! {
 }
 
 /// List all files in the filesystems
-pub fn list_apps() {
-    println!("/**** APPS ****");
+pub fn ls_root() {
+    println!("/**** ls / ****");
     for app in ROOT_INODE.ls() {
         println!("{}", app);
     }
@@ -118,25 +111,49 @@ impl OpenFlags {
 
 /// Open file with flags
 pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
+    open_file_at(&ROOT_INODE, name, flags)
+}
+
+/// Open file relative to base
+pub fn open_file_at(base: &Inode, name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     let (readable, writable) = flags.read_write();
+
+    let (path, fname) = match name.rsplit_once('/') {
+        Some(v) => v,
+        _ => (".", name),
+    };
+
     if flags.contains(OpenFlags::CREATE) {
-        match ROOT_INODE.find(name) {
-            Some(inode) => {
-                inode.clear();
-                Some(Arc::new(OSInode::new(readable, writable, inode)))
-            }
-            _ => ROOT_INODE
-                .create(name)
-                .map(|inode| Arc::new(OSInode::new(readable, writable, inode))),
+        // find parent first
+        match base.find(path) {
+            Some(parent) => match parent.find(fname) {
+                Some(inode) => {
+                    if flags.contains(OpenFlags::TRUNC) {
+                        inode.clear();
+                    }
+                    Some(Arc::new(OSInode::new(readable, writable, inode)))
+                }
+                _ => parent
+                    .create(fname)
+                    .map(|inode| Arc::new(OSInode::new(readable, writable, inode))),
+            },
+            _ => None,
         }
     } else {
-        ROOT_INODE.find(name).map(|inode| {
+        base.find(name).map(|inode| {
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear();
             }
             Arc::new(OSInode::new(readable, writable, inode))
         })
     }
+}
+
+pub fn find_file(path: &str) -> Option<Arc<OSInode>> {
+    assert!(path.starts_with('/'));
+    ROOT_INODE
+        .find(path)
+        .map(|inode| Arc::new(OSInode::new(true, true, inode)))
 }
 
 impl File for OSInode {
@@ -172,5 +189,29 @@ impl File for OSInode {
             total_write_size += len;
         }
         total_write_size
+    }
+}
+
+pub fn name_of_inode(inode: &Inode, parent: &Inode) -> String {
+    parent
+        .read_dirent(inode.inode_id(), |d| String::from(d.name()))
+        .expect("not exist in .. dir?!")
+}
+
+pub fn name_for_inode(inode: &Inode) -> String {
+    fn inner(inode: &Inode) -> String {
+        if inode.inode_id() == ROOT_INODE.inode_id() {
+            return String::new();
+        }
+
+        let parent = inode.find("..").expect("parent `..' not exist?!");
+        let name = name_of_inode(inode, &parent);
+        let ancestor_name = inner(&parent);
+        ancestor_name + "/" + &name
+    }
+
+    match inner(inode) {
+        s if s.is_empty() => String::from("/"), // special case for ROOT
+        s => s,
     }
 }

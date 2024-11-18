@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use context::TaskContext;
 use lazy_static::lazy_static;
-use task::{TaskControlBlock, TaskStatus};
+use task::TaskStatus;
 
 use crate::fs;
 
@@ -18,7 +18,7 @@ pub use mem::*;
 pub use processor::{
     current_task, current_trap_cx, current_user_token, run_tasks, user_time_end, user_time_start,
 };
-pub use task::{FileMapping, MMapReserve, MapRange};
+pub use task::{FileMapping, MMapReserve, MapRange, TaskControlBlock};
 
 lazy_static! {
     pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new({

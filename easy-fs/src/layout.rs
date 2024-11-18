@@ -83,7 +83,7 @@ pub struct DiskInode {
     type_: DiskInodeType,
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DiskInodeType {
     File,
     Directory,
@@ -96,6 +96,36 @@ impl DiskInode {
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;
+    }
+
+    pub fn initialize_dir<F: FnMut() -> u32>(
+        &mut self,
+        self_inode: u32,
+        parent_inode: u32,
+        mut data_alloc: F,
+        block_device: &Arc<dyn BlockDevice>,
+    ) {
+        assert_eq!(self.type_, DiskInodeType::Directory);
+
+        // increase size
+        let file_count = (self.size as usize) / DIRENT_SZ; // should be 0 when create
+        let new_size = ((file_count + 2) * DIRENT_SZ) as u32; // "." and ".."
+        let blocks_needed = self.blocks_num_needed(new_size);
+        let mut new_blocks = Vec::new();
+        for _ in 0..blocks_needed {
+            new_blocks.push(data_alloc());
+        }
+        self.increase_size(new_size, new_blocks, block_device);
+        // write both dir entry points to self
+        let buf = {
+            let mut b = [0u8; 2 * DIRENT_SZ];
+            let dir = DirEntry::new(".", self_inode);
+            b[..DIRENT_SZ].copy_from_slice(dir.as_bytes());
+            let dir = DirEntry::new("..", parent_inode);
+            b[DIRENT_SZ..].copy_from_slice(dir.as_bytes());
+            b
+        };
+        self.write_at(file_count * DIRENT_SZ, &buf[..], &block_device);
     }
 
     pub fn is_dir(&self) -> bool {

@@ -45,13 +45,13 @@ pub fn sys_get_time(ts: *mut TimeVal) -> isize {
 }
 
 pub fn sys_getpid() -> isize {
-    let current_task = current_task().unwrap();
-    current_task.getpid() as isize
+    let curr_task = current_task().unwrap();
+    curr_task.getpid() as isize
 }
 
 pub fn sys_fork() -> isize {
-    let current_task = current_task().unwrap();
-    let new_task = current_task.fork();
+    let curr_task = current_task().unwrap();
+    let new_task = curr_task.fork();
     let new_pid = new_task.pid.0;
     // modify trap context of new_task, because it returns immediately after switching
     let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
@@ -79,8 +79,8 @@ pub fn sys_exec(path: *const u8) -> isize {
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
-    let current_task = current_task().unwrap();
-    let mut inner = current_task.inner_exclusive_access();
+    let curr_task = current_task().unwrap();
+    let mut inner = curr_task.inner_exclusive_access();
 
     // find arbitrary child (given `pid: -1`) OR child identified by `pid`
     let (idx, p) = match inner

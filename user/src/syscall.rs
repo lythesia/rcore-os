@@ -2,7 +2,10 @@ use core::arch::asm;
 
 use crate::TimeVal;
 
-pub const SYSCALL_OPEN: usize = 56;
+const SYSCALL_GETCWD: usize = 17;
+const SYSCALL_MKDIRAT: usize = 34;
+const SYSCALL_CHDIR: usize = 49;
+pub const SYSCALL_OPENAT: usize = 56;
 pub const SYSCALL_CLOSE: usize = 57;
 pub const SYSCALL_READ: usize = 63;
 pub const SYSCALL_WRITE: usize = 64;
@@ -45,8 +48,13 @@ macro_rules! syscall {
     };
 }
 
-pub fn sys_open(path: &str, flags: u32) -> isize {
-    syscall!(SYSCALL_OPEN, path.as_ptr() as usize, flags as usize)
+pub fn sys_openat(fd: isize, path: &str, flags: u32) -> isize {
+    syscall!(
+        SYSCALL_OPENAT,
+        fd as usize,
+        path.as_ptr() as usize,
+        flags as usize
+    )
 }
 
 pub fn sys_close(fd: usize) -> isize {
@@ -54,7 +62,7 @@ pub fn sys_close(fd: usize) -> isize {
 }
 
 pub fn sys_read(fd: usize, buf: &mut [u8]) -> isize {
-    syscall!(SYSCALL_READ, fd, buf.as_ptr() as usize, buf.len())
+    syscall!(SYSCALL_READ, fd, buf.as_mut_ptr() as usize, buf.len())
 }
 
 pub fn sys_write(fd: usize, buf: &[u8]) -> isize {
@@ -107,4 +115,16 @@ pub fn sys_waitpid(pid: isize, xstatus: &mut i32) -> isize {
 
 pub fn sys_halt() -> isize {
     syscall!(SYSCALL_HALT)
+}
+
+pub fn sys_getcwd(path: &mut [u8]) -> isize {
+    syscall!(SYSCALL_GETCWD, path.as_mut_ptr() as usize, path.len())
+}
+
+pub fn sys_mkdirat(fd: isize, path: &str) -> isize {
+    syscall!(SYSCALL_MKDIRAT, fd as usize, path.as_ptr() as usize)
+}
+
+pub fn sys_chdir(path: &str) -> isize {
+    syscall!(SYSCALL_CHDIR, path.as_ptr() as usize)
 }
