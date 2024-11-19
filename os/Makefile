@@ -31,7 +31,14 @@ DISASM ?= -x
 # Run usertests or usershell
 TEST ?=
 
-build: env $(KERNEL_BIN) fs-img
+# Use existing disk
+USE_DISK ?=
+
+ifneq ($(strip $(USE_DISK)),)
+	FS_IMG := $(USE_DISK)
+endif
+
+build: env $(KERNEL_BIN) $(if $(strip $(USE_DISK)), ,fs-img)
 
 env:
 	(rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)

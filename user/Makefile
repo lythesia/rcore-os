@@ -3,31 +3,32 @@ MODE := release
 APP_DIR := src/bin
 TARGET_DIR := target/$(TARGET)/$(MODE)
 APPS := $(wildcard $(APP_DIR)/*.rs) # path/to/xx.rs
-ELFS := $(patsubst $(APP_DIR)/%.rs, $(TARGET_DIR)/%, $(APPS)) # target/to/xx
-BINS := $(patsubst $(APP_DIR)/%.rs, $(TARGET_DIR)/%.bin, $(APPS)) # target/to/xx.bin
-LINKER := src/linker.ld
-
-OBJDUMP := rust-objdump --arch-name=riscv64
-OBJCOPY := rust-objcopy --binary-architecture=riscv64
 
 ifeq ($(MODE), release)
 	MODE_ARG := --release
 endif
 
-TEST ?=
+TEST ?= 0
 
-elf: $(APPS)
-	@cargo build $(MODE_ARG)
-ifeq ($(TEST), 1)
-	@cp $(TARGET_DIR)/usertests $(TARGET_DIR)/initproc
+ifeq ($(TEST), 0) # no test, filter out ch*.rs
+	APPS := $(filter-out $(wildcard $(APP_DIR)/ch*.rs), $(wildcard $(APP_DIR)/*.rs))
+else ifeq ($(TEST), 1) # use usertests.rs only (to replace initproc)
+	APPS := $(APP_DIR)/usertests.rs
+else # ch$(T) only, plus initproc, user_shell, halt
+	T := $(TEST)
+	APPS := $(wildcard $(APP_DIR)/ch$(T)_*.rs)
+	APPS += $(APP_DIR)/initproc.rs $(APP_DIR)/user_shell.rs $(APP_DIR)/halt.rs
 endif
 
-binary: elf
-	@$(foreach elf, $(ELFS), $(OBJCOPY) $(elf) --strip-all -O binary $(patsubst $(TARGET_DIR)/%, $(TARGET_DIR)/%.bin, $(elf));)
+elf: $(APPS)
+	@$(foreach app, $(APPS), cargo build $(MODE_ARG) --bin $(basename $(notdir $(app)));)
+ifeq ($(TEST), 1)
+	@mv -f $(TARGET_DIR)/usertests $(TARGET_DIR)/initproc
+endif
 
-build: binary
+build: elf
 
 clean:
 	@cargo clean
 
-.PHONY: elf binary build clean
+.PHONY: elf build clean
