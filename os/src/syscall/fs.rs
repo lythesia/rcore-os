@@ -1,12 +1,22 @@
 use alloc::sync::Arc;
+use bitflags::bitflags;
 use easy_fs::Inode;
 
 use crate::{
     cast::DowncastArc,
-    fs::{self, name_for_inode, File, OSInode, OpenFlags, ROOT_INODE},
+    fs::{self, name_for_inode, unlink_file_at, File, OSInode, OpenFlags, ROOT_INODE},
     mm::{self, translated_byte_buffer, UserBuffer},
     task::{self, TaskControlBlock},
 };
+
+macro_rules! bail_exit {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(exit) => return exit,
+        }
+    };
+}
 
 /// write buf of length `len` to a file with `fd`
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
@@ -104,11 +114,7 @@ pub fn sys_openat(fd: isize, path: *const u8, flags: u32) -> isize {
     let token = curr_task.inner_exclusive_access().get_user_token();
     let path = mm::translated_str(token, path);
 
-    let base = match base_inode(fd, &path, or, ow, &curr_task) {
-        Ok(v) => v,
-        Err(exit) => return exit,
-    };
-
+    let base = bail_exit!(base_inode(fd, &path, or, ow, &curr_task));
     if let Some(inode) = fs::open_file_at(&base, &path, open_flags) {
         let mut inner = curr_task.inner_exclusive_access();
         let fd = inner.alloc_fd();
@@ -152,16 +158,12 @@ pub fn sys_getcwd(ptr: *mut u8, len: usize) -> isize {
     0
 }
 
-pub fn sys_mkdirat(fd: isize, ptr: *const u8) -> isize {
+pub fn sys_mkdirat(fd: isize, path: *const u8) -> isize {
     let curr_task = task::current_task().unwrap();
     let token = curr_task.inner_exclusive_access().get_user_token();
-    let path = mm::translated_str(token, ptr);
+    let path = mm::translated_str(token, path);
 
-    let mut base = match base_inode(fd, &path, true, true, &curr_task) {
-        Ok(v) => v,
-        Err(exit) => return exit,
-    };
-
+    let mut base = bail_exit!(base_inode(fd, &path, true, true, &curr_task));
     for name in path.split("/").filter(|s| !s.is_empty()) {
         match base.create_dir(name) {
             Some(created) => base = created,
@@ -179,16 +181,12 @@ pub fn sys_mkdirat(fd: isize, ptr: *const u8) -> isize {
     0
 }
 
-pub fn sys_chdir(ptr: *const u8) -> isize {
+pub fn sys_chdir(path: *const u8) -> isize {
     let curr_task = task::current_task().unwrap();
     let token = curr_task.inner_exclusive_access().get_user_token();
-    let path = mm::translated_str(token, ptr);
+    let path = mm::translated_str(token, path);
 
-    let base = match base_inode(AT_FDCWD, &path, true, true, &curr_task) {
-        Ok(v) => v,
-        Err(exit) => return exit,
-    };
-
+    let base = bail_exit!(base_inode(AT_FDCWD, &path, true, true, &curr_task));
     match base.find(&path) {
         Some(d) => {
             if !d.is_dir() {
@@ -198,6 +196,126 @@ pub fn sys_chdir(ptr: *const u8) -> isize {
         }
         _ => {
             return -1;
+        }
+    }
+    0
+}
+
+pub fn sys_unlinkat(fd: isize, path: *const u8) -> isize {
+    // TODO support actual dirfd
+    if fd != AT_FDCWD {
+        return -1;
+    }
+
+    let curr_task = task::current_task().unwrap();
+    let token = curr_task.inner_exclusive_access().get_user_token();
+    let path = mm::translated_str(token, path);
+
+    let base = bail_exit!(base_inode(AT_FDCWD, &path, true, true, &curr_task));
+    if unlink_file_at(&base, &path) {
+        0
+    } else {
+        -1
+    }
+}
+
+pub fn sys_linkat(fd: isize, oldpath: *const u8, newpath: *const u8) -> isize {
+    // TODO support actual dirfd
+    if fd != AT_FDCWD {
+        return -1;
+    }
+
+    let curr_task = task::current_task().unwrap();
+    let token = curr_task.inner_exclusive_access().get_user_token();
+    let oldpath = mm::translated_str(token, oldpath);
+    let newpath = mm::translated_str(token, newpath);
+
+    let oldbase = bail_exit!(base_inode(AT_FDCWD, &oldpath, true, true, &curr_task));
+    let newbase = bail_exit!(base_inode(AT_FDCWD, &newpath, true, true, &curr_task));
+
+    // parent.link(name, old_inode)
+    // old must exist
+    let old_inode = bail_exit!(oldbase.find(&oldpath).ok_or(-1));
+    let (path, fname) = match newpath.rsplit_once('/') {
+        Some(v) => v,
+        _ => (".", newpath.as_str()),
+    };
+    // parent must exist
+    let parent = bail_exit!(newbase.find(path).ok_or(-1));
+    if parent.link(fname, &old_inode).is_some() {
+        0
+    } else {
+        -1
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct Stat {
+    pub dev: u64,
+    pub ino: u64,
+    pub mode: StatMode,
+    pub nlink: u32,
+    pad: [u64; 7],
+}
+
+impl Stat {
+    pub fn new(ino: u64, mode: StatMode, nlink: u32) -> Self {
+        Self {
+            dev: 0,
+            ino,
+            mode,
+            nlink,
+            pad: [0; 7],
+        }
+    }
+}
+
+bitflags! {
+    pub struct StatMode: u32 {
+        const NULL  = 0;
+        /// directory
+        const DIR   = 0o040000;
+        /// ordinary regular file
+        const FILE  = 0o100000;
+    }
+}
+
+pub fn sys_fstat(fd: usize, ptr: *mut Stat) -> isize {
+    let curr_task = task::current_task().unwrap();
+    let task_inner = curr_task.inner_exclusive_access();
+
+    // fd must exist
+    let inode = match task_inner.fd_table.get(fd) {
+        Some(Some(file)) => {
+            let file_clone = file.clone();
+            bail_exit!(file_clone.downcast_arc::<OSInode>().ok_or(-1)).clone_inner_inode()
+        }
+        _ => return -1,
+    };
+
+    let ino = inode.inode_id();
+    let mode = if inode.is_dir() {
+        StatMode::DIR
+    } else if inode.is_file() {
+        StatMode::FILE
+    } else {
+        StatMode::NULL
+    };
+    let nlink = inode.nlink();
+    let stat = Stat::new(ino as u64, mode, nlink);
+
+    let dst_vs = mm::translated_byte_buffer(
+        task_inner.get_user_token(),
+        ptr as *const u8,
+        core::mem::size_of::<Stat>(),
+    );
+    let s_ptr = (&stat as *const Stat) as *const u8;
+    for (i, dst) in dst_vs.into_iter().enumerate() {
+        let len = dst.len();
+        unsafe {
+            let src = core::slice::from_raw_parts(s_ptr.wrapping_add(i * len), len);
+            dst.copy_from_slice(src);
         }
     }
     0

@@ -1,24 +1,27 @@
 use core::arch::asm;
 
-use crate::TimeVal;
+use crate::{Stat, TimeVal};
 
 const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_MKDIRAT: usize = 34;
+const SYSCALL_UNLINKAT: usize = 35;
+const SYSCALL_LINKAT: usize = 37;
 const SYSCALL_CHDIR: usize = 49;
-pub const SYSCALL_OPENAT: usize = 56;
-pub const SYSCALL_CLOSE: usize = 57;
-pub const SYSCALL_READ: usize = 63;
-pub const SYSCALL_WRITE: usize = 64;
-pub const SYSCALL_EXIT: usize = 93;
-pub const SYSCALL_YIELD: usize = 124;
-pub const SYSCALL_GET_TIME: usize = 169;
-pub const SYSCALL_GETPID: usize = 172;
-pub const SYSCALL_MUNMAP: usize = 215;
-pub const SYSCALL_FORK: usize = 220;
-pub const SYSCALL_EXEC: usize = 221;
-pub const SYSCALL_MMAP: usize = 222;
-pub const SYSCALL_WAITPID: usize = 260;
-pub const SYSCALL_HALT: usize = 555;
+const SYSCALL_OPENAT: usize = 56;
+const SYSCALL_CLOSE: usize = 57;
+const SYSCALL_READ: usize = 63;
+const SYSCALL_WRITE: usize = 64;
+const SYSCALL_FSTAT: usize = 80;
+const SYSCALL_EXIT: usize = 93;
+const SYSCALL_YIELD: usize = 124;
+const SYSCALL_GET_TIME: usize = 169;
+const SYSCALL_GETPID: usize = 172;
+const SYSCALL_MUNMAP: usize = 215;
+const SYSCALL_FORK: usize = 220;
+const SYSCALL_EXEC: usize = 221;
+const SYSCALL_MMAP: usize = 222;
+const SYSCALL_WAITPID: usize = 260;
+const SYSCALL_HALT: usize = 555;
 
 fn syscall(id: usize, args: [usize; 3]) -> isize {
     let mut ret: isize;
@@ -77,7 +80,7 @@ pub fn sys_yield() -> isize {
     syscall!(SYSCALL_YIELD)
 }
 
-pub fn sys_get_time(ts: &TimeVal) -> isize {
+pub fn sys_get_time(ts: &mut TimeVal) -> isize {
     syscall!(SYSCALL_GET_TIME, ts as *const _ as usize)
 }
 
@@ -127,4 +130,21 @@ pub fn sys_mkdirat(fd: isize, path: &str) -> isize {
 
 pub fn sys_chdir(path: &str) -> isize {
     syscall!(SYSCALL_CHDIR, path.as_ptr() as usize)
+}
+
+pub fn sys_unlinkat(fd: isize, path: &str) -> isize {
+    syscall!(SYSCALL_UNLINKAT, fd as usize, path.as_ptr() as usize)
+}
+
+pub fn sys_linkat(fd: isize, oldpath: &str, newpath: &str) -> isize {
+    syscall!(
+        SYSCALL_LINKAT,
+        fd as usize,
+        oldpath.as_ptr() as usize,
+        newpath.as_ptr() as usize
+    )
+}
+
+pub fn sys_fstat(fd: usize, stat: &mut Stat) -> isize {
+    syscall!(SYSCALL_FSTAT, fd as usize, stat as *mut _ as usize)
 }

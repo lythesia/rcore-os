@@ -149,6 +149,19 @@ pub fn open_file_at(base: &Inode, name: &str, flags: OpenFlags) -> Option<Arc<OS
     }
 }
 
+/// Unlink file relative to base TODO move to fs.rs?
+pub fn unlink_file_at(base: &Inode, name: &str) -> bool {
+    let (path, fname) = match name.rsplit_once('/') {
+        Some(v) => v,
+        _ => (".", name),
+    };
+
+    match base.find(path) {
+        Some(parent) => parent.unlink(fname),
+        _ => false,
+    }
+}
+
 pub fn find_file(path: &str) -> Option<Arc<OSInode>> {
     assert!(path.starts_with('/'));
     ROOT_INODE

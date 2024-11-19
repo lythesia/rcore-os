@@ -5,7 +5,7 @@ use crate::{block_cache::get_block_cache, block_dev::BlockDevice, BLOCK_SZ};
 /// Magic number for sanity check
 const EFS_MAGIC: u32 = 0x3b800001;
 /// The max number of direct inodes
-const INODE_DIRECT_COUNT: usize = 28;
+const INODE_DIRECT_COUNT: usize = 26;
 /// The max length of inode name
 const NAME_LENGTH_LIMIT: usize = 27;
 /// The max number of indirect1 inodes
@@ -73,7 +73,9 @@ type DataBlock = [u8; BLOCK_SZ];
 #[repr(C)] // size == 32*u32 = 128B == 1/4 block
 pub struct DiskInode {
     pub size: u32,
-    // when file is small, `direct` refs 28 data blocks == 28*512 = 14KB
+    pub nlink: u32, // nlink taks 4B
+    _rsv: u32,      // reserve make `direct` is even
+    // when file is small, `direct` refs 28-2 data blocks == (28-2)*512 = 14-1KB
     pub direct: [u32; INODE_DIRECT_COUNT],
     // when file is large, `indirect1` refs to L1 index block, every u32 in it refs to
     // data block, so total 512/4*512 = 64KB
@@ -92,6 +94,7 @@ pub enum DiskInodeType {
 impl DiskInode {
     pub fn initialize(&mut self, type_: DiskInodeType) {
         self.size = 0;
+        self.nlink = 1;
         self.direct.fill(0);
         self.indirect1 = 0;
         self.indirect2 = 0;
@@ -231,10 +234,11 @@ impl DiskInode {
         // new_total > `INODE_DIRECT_COUNT`
         // alloc `indrect1`
         if new_total > INODE_DIRECT_COUNT {
-            assert_eq!(curr_total, INODE_DIRECT_COUNT);
-            self.indirect1 = iter_new.next().unwrap();
+            if curr_total == INODE_DIRECT_COUNT {
+                self.indirect1 = iter_new.next().unwrap();
+            }
             // re-pos
-            curr_total -= INODE_DIRECT_COUNT; // 0
+            curr_total -= INODE_DIRECT_COUNT;
             new_total -= INODE_DIRECT_COUNT;
         } else {
             return;
@@ -253,10 +257,11 @@ impl DiskInode {
         // new_total > `INODE_DIRECT1_COUNT`
         // alloc `indrect2`
         if new_total > INODE_INDIRECT1_COUNT {
-            assert_eq!(curr_total, INODE_INDIRECT1_COUNT);
-            self.indirect2 = iter_new.next().unwrap();
+            if curr_total == INODE_INDIRECT1_COUNT {
+                self.indirect2 = iter_new.next().unwrap();
+            }
             // re-pos
-            curr_total -= INODE_INDIRECT1_COUNT; // 0
+            curr_total -= INODE_INDIRECT1_COUNT;
             new_total -= INODE_INDIRECT1_COUNT;
         } else {
             return;
@@ -280,13 +285,13 @@ impl DiskInode {
                         .lock()
                         .modify(0, |indirect1: &mut IndirectBlock| {
                             let end = if a0 < a1 { INODE_INDIRECT1_COUNT } else { b1 };
-                            for i in 0..end {
+                            for i in b0..end {
                                 indirect1[i] = iter_new.next().unwrap();
                             }
-                            curr_total += end;
+                            curr_total += (b0..end).count();
                         });
                 }
-            })
+            });
     }
 
     /// Clear size to zero and return blocks that should be deallocated.

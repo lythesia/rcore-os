@@ -4,9 +4,7 @@ use crate::{cast::DowncastArc, mm::UserBuffer};
 
 mod inode;
 mod stdio;
-pub use inode::{
-    find_file, ls_root, name_for_inode, open_file, open_file_at, OSInode, OpenFlags, ROOT_INODE,
-};
+pub use inode::*;
 pub use stdio::{Stdin, Stdout};
 
 pub trait File: Any + Send + Sync {

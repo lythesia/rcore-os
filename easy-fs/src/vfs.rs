@@ -9,6 +9,7 @@ use crate::{
 };
 
 /// Virtual filesystem layer over easy-fs
+#[derive(Clone)]
 pub struct Inode {
     inode_id: u32,
 
@@ -55,7 +56,7 @@ impl Inode {
     /// Find inode under a disk inode by name
     fn find_inode_id(&self, name: &str, disk_inode: &DiskInode) -> Option<u32> {
         assert!(disk_inode.is_dir());
-        // data of `disk_node` should be array of `Dirent`s
+        // data of `disk_inode` should be array of `Dirent`s
         let file_count = (disk_inode.size as usize) / DIRENT_SZ;
         let mut dirent = DirEntry::new_empty();
         for i in 0..file_count {
@@ -243,9 +244,7 @@ impl Inode {
         self.create_inode(name, DiskInodeType::Directory)
     }
 
-    /// Clear the data in current inode
-    pub fn clear(&self) {
-        let mut fs = self.fs.lock();
+    fn clear_locked(&self, fs: &mut EasyFileSystem) {
         self.modify_disk_inode(|disk_inode| {
             assert!(disk_inode.is_file());
             let size = disk_inode.size;
@@ -259,6 +258,12 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+
+    /// Clear the data in current inode
+    pub fn clear(&self) {
+        let mut fs = self.fs.lock();
+        self.clear_locked(&mut fs);
     }
 
     /// Read data from current inode
@@ -295,5 +300,99 @@ impl Inode {
     /// Is file?
     pub fn is_file(&self) -> bool {
         self.read_disk_inode(|disk_inode| disk_inode.is_file())
+    }
+
+    /// Get link number
+    pub fn nlink(&self) -> u32 {
+        self.read_disk_inode(|disk_inode| disk_inode.nlink)
+    }
+
+    /// Create hard link `name` from `src`
+    pub fn link(&self, name: &str, src: &Inode) -> Option<Arc<Inode>> {
+        let mut fs = self.fs.lock();
+
+        let op = |root_inode: &DiskInode| {
+            assert!(root_inode.is_dir());
+            self.find_inode_id(name, root_inode)
+        };
+        // exist already
+        if self.read_disk_inode(op).is_some() {
+            return None;
+        }
+
+        // add dirent under self
+        self.modify_disk_inode(|disk_inode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            self.increase_size(new_size as u32, disk_inode, &mut fs);
+            let dirent = DirEntry::new(name, src.inode_id);
+            disk_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+        // inc src nlink
+        src.modify_disk_inode(|disk_inode| disk_inode.nlink += 1);
+        Some(Arc::new(Self::clone(src)))
+    }
+
+    /// Remove hard link (return if removed successfully)
+    pub fn unlink(&self, name: &str) -> bool {
+        let mut fs = self.fs.lock();
+        // self is dir && "name" exists
+        let target = self.modify_disk_inode(|disk_inode| {
+            if !disk_inode.is_dir() {
+                return None;
+            }
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            let mut dirent = DirEntry::new_empty();
+            let mut swap = DirEntry::new_empty();
+            match (0..file_count).position(|i| {
+                assert_eq!(
+                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device),
+                    DIRENT_SZ
+                );
+                dirent.name() == name
+            }) {
+                Some(i) => {
+                    // target
+                    let target_inode_id = dirent.inode_number();
+                    let (target_block_id, target_block_offset) =
+                        fs.get_disk_inode_pos(target_inode_id);
+                    let target = Self::new(
+                        target_inode_id,
+                        target_block_id,
+                        target_block_offset,
+                        self.fs.clone(),
+                        self.block_device.clone(),
+                    );
+                    // we don't actually delete i-th, but swap last to i-th, and decrease disk_inode.size only
+                    // in real world we should decrease data of this dir's actual space (at proper time?)
+                    disk_inode.read_at(
+                        (file_count - 1) * DIRENT_SZ,
+                        swap.as_bytes_mut(),
+                        &self.block_device,
+                    );
+                    disk_inode.write_at(i * DIRENT_SZ, swap.as_bytes(), &self.block_device);
+                    disk_inode.size -= DIRENT_SZ as u32;
+                    Some(target)
+                }
+                _ => None, // no such file
+            }
+        });
+        // clear target's data if link decrease to 0
+        if let Some(target) = target {
+            if target.modify_disk_inode(|disk_inode| {
+                disk_inode.nlink -= 1;
+                disk_inode.nlink
+            }) == 0
+            {
+                target.clear_locked(&mut fs);
+            }
+            true
+        } else {
+            false
+        }
     }
 }
