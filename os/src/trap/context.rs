@@ -1,6 +1,7 @@
 use riscv::register::sstatus::{self, Sstatus, SPP};
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct TrapContext {
     /// reg: x0 ~ x31
     pub x: [usize; 32],

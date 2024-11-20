@@ -4,19 +4,12 @@ use easy_fs::Inode;
 
 use crate::{
     cast::DowncastArc,
-    fs::{self, name_for_inode, unlink_file_at, File, OSInode, OpenFlags, ROOT_INODE},
+    fs::{self, make_pipe, name_for_inode, unlink_file_at, File, OSInode, OpenFlags, ROOT_INODE},
     mm::{self, translated_byte_buffer, UserBuffer},
     task::{self, TaskControlBlock},
 };
 
-macro_rules! bail_exit {
-    ($e:expr) => {
-        match $e {
-            Ok(v) => v,
-            Err(exit) => return exit,
-        }
-    };
-}
+use super::bail_exit;
 
 /// write buf of length `len` to a file with `fd`
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
@@ -319,4 +312,30 @@ pub fn sys_fstat(fd: usize, ptr: *mut Stat) -> isize {
         }
     }
     0
+}
+
+pub fn sys_pipe(pipe: *mut usize) -> isize {
+    let task = task::current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    let token = inner.get_user_token();
+    let (pipe_read, pipe_write) = make_pipe();
+    let read_fd = inner.alloc_fd();
+    inner.fd_table[read_fd] = Some(pipe_read);
+    let write_fd = inner.alloc_fd();
+    inner.fd_table[write_fd] = Some(pipe_write);
+    *mm::translated_refmut(token, pipe) = read_fd;
+    *mm::translated_refmut(token, unsafe { pipe.add(1) }) = write_fd;
+    0
+}
+
+pub fn sys_dup(fd: usize) -> isize {
+    let task = task::current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    let file = match inner.fd_table.get(fd) {
+        Some(Some(file)) => file.clone(),
+        _ => return -1,
+    };
+    let new_fd = inner.alloc_fd();
+    inner.fd_table[new_fd] = Some(file);
+    new_fd as isize
 }

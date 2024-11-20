@@ -72,6 +72,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
             Ok(fname)
         })
         .collect::<std::io::Result<Vec<_>>>()?;
+    println!("easy-fs-use >>>>");
     for app in apps {
         // load built app only from host file system
         let path = opt.target.join(&app);
@@ -82,15 +83,15 @@ fn easy_fs_pack() -> std::io::Result<()> {
         let mut host_file = File::open(path)?;
         let mut all_data = Vec::new();
         host_file.read_to_end(&mut all_data)?;
+        println!(
+            "easy-fs-fuse: + {app} {}B {}KB",
+            all_data.len(),
+            all_data.len() / 1024
+        );
         // create a file in easy-fs
         let inode = root_inode.create(&app).unwrap();
         // write data to easy-fs
         inode.write_at(0, &all_data);
-    }
-    // list apps
-    println!("easy-fs-use >>>>");
-    for app in root_inode.ls() {
-        println!("easy-fs-use: + {}", app);
     }
     println!("easy-fs-use <<<<");
     Ok(())
@@ -192,7 +193,13 @@ mod tests {
         if depth == 0 {
             println!("{}", name);
         } else {
-            println!("+-- {}", name);
+            println!(
+                "+-- {} f:{} {}B {}KB",
+                name,
+                inode.is_file(),
+                inode.get_size(),
+                inode.get_size() / 1024
+            );
         }
         for f in inode.ls() {
             // skip "." and ".."

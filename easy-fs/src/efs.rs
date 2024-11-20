@@ -3,7 +3,7 @@ use spin::Mutex;
 
 use crate::{
     bitmap::Bitmap,
-    block_cache::get_block_cache,
+    block_cache::{block_cache_sync_all, get_block_cache},
     block_dev::BlockDevice,
     layout::{DiskInode, DiskInodeType, SuperBlock},
     vfs::Inode,
@@ -91,6 +91,7 @@ impl EasyFileSystem {
                 root_inode.initialize(DiskInodeType::Directory);
                 root_inode.initialize_dir(0, 0, || efs.alloc_data(), &block_device);
             });
+        block_cache_sync_all();
 
         Arc::new(Mutex::new(efs))
     }

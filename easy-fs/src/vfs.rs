@@ -274,12 +274,14 @@ impl Inode {
     /// Write data to current inode
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> usize {
         let mut fs = self.fs.lock();
-        self.modify_disk_inode(|disk_inode| {
+        let size = self.modify_disk_inode(|disk_inode| {
             assert!(disk_inode.is_file());
             // extend first
             self.increase_size((offset + buf.len()) as u32, disk_inode, &mut fs);
             disk_inode.write_at(offset, buf, &self.block_device)
-        })
+        });
+        block_cache_sync_all(); // MUST sync here to avoid data lost
+        size
     }
 
     /// Get inode id

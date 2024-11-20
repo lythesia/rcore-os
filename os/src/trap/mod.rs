@@ -9,6 +9,7 @@ use riscv::register::{
 use crate::{
     config::{TRAMPOLINE, TRAP_CONTEXT},
     syscall::syscall,
+    task::SignalFlags,
 };
 
 mod context;
@@ -64,19 +65,16 @@ pub fn trap_handler() -> ! {
         | scause::Trap::Exception(Exception::StorePageFault)
         | scause::Trap::Exception(Exception::LoadPageFault) => {
             if !crate::task::handle_page_fault(stval) {
-                log::error!("[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
-                    scause.cause(),
-                    stval,
-                    crate::task::current_trap_cx().sepc
-                );
-                // page fault exit code
-                crate::task::exit_current_and_run_next(-2);
+                // log::error!("[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
+                //     scause.cause(),
+                //     stval,
+                //     crate::task::current_trap_cx().sepc
+                // );
+                crate::task::current_add_signal(SignalFlags::SIGSEGV);
             }
         }
         scause::Trap::Exception(Exception::IllegalInstruction) => {
-            log::error!("[kernel] IllegalInstruction in application, core dumped.");
-            // illegal instruction exit code
-            crate::task::exit_current_and_run_next(-3);
+            crate::task::current_add_signal(SignalFlags::SIGILL);
         }
         scause::Trap::Interrupt(Interrupt::SupervisorTimer) => {
             crate::timer::set_next_trigger();
@@ -90,6 +88,14 @@ pub fn trap_handler() -> ! {
             );
         }
     }
+    // handle signals (handle the sent signal)
+    crate::task::handle_signals();
+    // check error signals (if error then exit)
+    if let Some((errno, msg)) = crate::task::check_signals_error_of_current() {
+        println!("[kernel] {}", msg);
+        crate::task::exit_current_and_run_next(errno);
+    }
+
     crate::task::user_time_start();
     trap_return()
 }

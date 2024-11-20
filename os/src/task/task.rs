@@ -1,6 +1,7 @@
 use core::cell::RefMut;
 
 use alloc::collections::btree_map::BTreeMap;
+use alloc::string::String;
 use alloc::vec;
 use alloc::{
     sync::{Arc, Weak},
@@ -11,7 +12,9 @@ use easy_fs::Inode;
 use crate::cast::DowncastArc;
 use crate::config::{MMAP_AREA_BASE, PAGE_SIZE};
 use crate::fs::{OSInode, Stdin, Stdout, ROOT_INODE};
-use crate::mm::{frame_alloc, FrameTracker, MapPermission, PageTable, VPNRange, VirtPageNum};
+use crate::mm::{
+    frame_alloc, translated_refmut, FrameTracker, MapPermission, PageTable, VPNRange, VirtPageNum,
+};
 use crate::{
     config::TRAP_CONTEXT,
     fs::File,
@@ -20,11 +23,11 @@ use crate::{
     trap::{trap_handler, TrapContext},
 };
 
-use super::MMapType;
 use super::{
     context::TaskContext,
     pid::{pid_alloc, KernelStack, PidHandle},
 };
+use super::{MMapType, SignalActions, SignalFlags};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum TaskStatus {
@@ -61,6 +64,21 @@ pub struct TaskControlBlockInner {
 
     // cwd
     pub cwd: Arc<Inode>,
+
+    // signal
+    // the signal which is being handling
+    pub handling_sig: isize,
+    // signal got but not handled yet
+    pub signals: SignalFlags,
+    // signal in signal_mask will be masked globally for this task
+    pub signal_mask: SignalFlags,
+    // maintain how to react on each signal
+    pub signal_actions: SignalActions,
+    // if the task is killed
+    pub killed: bool,
+    // if the task is frozen by a signal
+    pub frozen: bool,
+    pub trap_cx_backup: Option<TrapContext>,
 
     // time stats
     pub user_time: usize,
@@ -363,6 +381,13 @@ impl TaskControlBlock {
                     mmap_va_allocator: VirtAddressAllocator::new(MMAP_AREA_BASE),
                     file_mappings: Vec::new(),
                     cwd: ROOT_INODE.clone(),
+                    handling_sig: -1,
+                    signals: SignalFlags::empty(),
+                    signal_mask: SignalFlags::empty(),
+                    signal_actions: SignalActions::default(),
+                    killed: false,
+                    frozen: false,
+                    trap_cx_backup: None,
                     user_time: 0,
                     kernel_time: 0,
                 })
@@ -438,6 +463,14 @@ impl TaskControlBlock {
                     mmap_va_allocator: parent_inner.mmap_va_allocator.clone(),
                     file_mappings,
                     cwd: parent_inner.cwd.clone(),
+                    handling_sig: -1,
+                    signals: SignalFlags::empty(),
+                    // inherit the signal_mask and signal_action
+                    signal_mask: parent_inner.signal_mask,
+                    signal_actions: parent_inner.signal_actions.clone(),
+                    killed: false,
+                    frozen: false,
+                    trap_cx_backup: None,
                     user_time: 0,
                     kernel_time: 0,
                 })
@@ -453,12 +486,39 @@ impl TaskControlBlock {
         task_control_block
     }
 
-    pub fn exec(&self, elf_data: &[u8]) {
-        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+    pub fn exec(&self, elf_data: &[u8], args: Vec<String>) {
+        let (memory_set, mut user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT).into())
             .unwrap()
             .ppn();
+
+        // push arguments on user stack
+        // +1 is last 0, indicate end of args
+        user_sp -= (args.len() + 1) * core::mem::size_of::<usize>();
+        let argv_base = user_sp;
+        // argv is array of ptr, each ptr points to actual str arg
+        let mut argv: Vec<_> = (0..=args.len())
+            .map(|i| {
+                translated_refmut(
+                    memory_set.token(),
+                    (argv_base + i * core::mem::size_of::<usize>()) as *mut usize,
+                )
+            })
+            .collect();
+        *argv[args.len()] = 0;
+        for i in 0..args.len() {
+            user_sp -= args[i].len() + 1;
+            *argv[i] = user_sp;
+            let mut p = user_sp;
+            for c in args[i].as_bytes() {
+                *translated_refmut(memory_set.token(), p as *mut u8) = *c;
+                p += 1;
+            }
+            *translated_refmut(memory_set.token(), p as *mut u8) = 0; // each str arg end with nul
+        }
+        // make the user_sp aligned to 8B for k210 platform, but qemu works w/o it
+        user_sp -= user_sp % core::mem::size_of::<usize>();
 
         // access inner exclusively
         let mut inner = self.inner_exclusive_access();
@@ -466,13 +526,15 @@ impl TaskControlBlock {
         inner.memory_set = memory_set; // 原有的地址空间会被回收(包括物理frame)
         inner.trap_cx_ppn = trap_cx_ppn;
         // init trap_cx
-        let trap_cx = inner.get_trap_cx();
-        *trap_cx = TrapContext::app_init_context(
+        let mut trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
             KERNEL_SPACE.exclusive_access().token(),
             self.kstack.get_top(),
             trap_handler as usize,
         );
+        trap_cx.x[10] = args.len(); // a0 = argc
+        trap_cx.x[11] = argv_base; // a1 = argv
+        *inner.get_trap_cx() = trap_cx;
     }
 }

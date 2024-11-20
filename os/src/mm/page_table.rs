@@ -246,6 +246,13 @@ pub fn translated_str(token: usize, ptr: *const u8) -> String {
     s
 }
 
+pub fn translate_ref<T>(token: usize, ptr: *const T) -> &'static T {
+    let page_table = PageTable::from_token(token);
+    let va = VirtAddr::from(ptr as usize);
+    let pa = page_table.translate_va(va).unwrap();
+    pa.get_ref()
+}
+
 /// for primitive values only
 // Q: https://github.com/rcore-os/rCore-Tutorial-Book-v3/issues/55#issuecomment-1568718900
 // A: compiler保证这些值的地址是aligned, 即不会cross page boundary
