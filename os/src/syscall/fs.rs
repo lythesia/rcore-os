@@ -249,22 +249,25 @@ pub struct Stat {
     pub ino: u64,
     pub mode: StatMode,
     pub nlink: u32,
-    pad: [u64; 7],
+    pub size: u64, // added
+    pad: [u64; 6],
 }
 
 impl Stat {
-    pub fn new(ino: u64, mode: StatMode, nlink: u32) -> Self {
+    pub fn new(ino: u64, mode: StatMode, nlink: u32, size: u64) -> Self {
         Self {
             dev: 0,
             ino,
             mode,
             nlink,
-            pad: [0; 7],
+            size,
+            pad: [0; 6],
         }
     }
 }
 
 bitflags! {
+    #[derive(Default)]
     pub struct StatMode: u32 {
         const NULL  = 0;
         /// directory
@@ -295,8 +298,9 @@ pub fn sys_fstat(fd: usize, ptr: *mut Stat) -> isize {
     } else {
         StatMode::NULL
     };
+    let size = inode.get_size();
     let nlink = inode.nlink();
-    let stat = Stat::new(ino as u64, mode, nlink);
+    let stat = Stat::new(ino as u64, mode, nlink, size as u64);
 
     let dst_vs = mm::translated_byte_buffer(
         task_inner.get_user_token(),
@@ -338,4 +342,62 @@ pub fn sys_dup(fd: usize) -> isize {
     let new_fd = inner.alloc_fd();
     inner.fd_table[new_fd] = Some(file);
     new_fd as isize
+}
+
+/// The max length of inode name
+const NAME_LENGTH_LIMIT: usize = 27;
+#[repr(C, align(32))]
+#[derive(Clone, Default)]
+pub struct Dirent {
+    pub ftype: FileType,
+    pub name: [u8; NAME_LENGTH_LIMIT],
+    pub next_offset: u32,
+}
+
+bitflags! {
+    #[derive(Default)]
+    pub struct FileType: u8 {
+        const UNKNOWN = 0;
+        const DIR = 1 << 0;
+        const REG = 1 << 1;
+    }
+}
+
+pub fn sys_getdents(fd: usize, ptr: *mut Dirent, len: usize) -> isize {
+    let task = task::current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    let token = inner.get_user_token();
+
+    let file = match inner.fd_table.get(fd) {
+        Some(Some(file)) => {
+            let file_clone = file.clone();
+            match file_clone.downcast_arc::<OSInode>() {
+                Some(os_inode) if os_inode.is_dir() => os_inode.clone_inner_inode(),
+                _ => return -1,
+            }
+        }
+        _ => return -1,
+    };
+    let cursor = mm::translate_ref(token, unsafe { ptr.add(len - 1) }).next_offset;
+    let dirents = file.dirents(cursor);
+    let nread = len.min(dirents.len());
+    for i in 0..nread {
+        let ename = dirents[i].0.as_bytes();
+        let inode = &dirents[i].1;
+        let ftype = if inode.is_dir() {
+            FileType::DIR
+        } else if inode.is_file() {
+            FileType::REG
+        } else {
+            FileType::UNKNOWN
+        };
+        let mut name = [0u8; NAME_LENGTH_LIMIT];
+        name[..ename.len()].copy_from_slice(&ename[..]);
+        *mm::translated_refmut(token, unsafe { ptr.add(i) }) = Dirent {
+            ftype,
+            name,
+            next_offset: cursor + i as u32 + 1,
+        };
+    }
+    nread as isize
 }

@@ -7,7 +7,9 @@ extern crate alloc;
 extern crate user_lib;
 
 use alloc::{string::String, vec::Vec};
-use user_lib::{close, console::getchar, dup, exec, fork, open, pipe, waitpid, OpenFlags};
+use user_lib::{
+    chdir, close, console::getchar, dup, exec, fork, getcwd, open, pipe, waitpid, OpenFlags,
+};
 
 const BS: u8 = 0x08;
 const LF: u8 = 0x0a;
@@ -85,6 +87,33 @@ fn main() -> i32 {
                     let input = line.trim();
                     if input.is_empty() {
                         break 'repl;
+                    }
+
+                    // shell builtin
+                    {
+                        let (cmd, args_str) = input
+                            .split_once(|ch: char| ch.is_ascii_whitespace())
+                            .unwrap_or((input, ""));
+                        let args = args_str
+                            .split_ascii_whitespace()
+                            .map(|arg| {
+                                let mut s = String::from(arg);
+                                s.push('\0');
+                                s
+                            })
+                            .collect::<Vec<_>>();
+                        match exec_builtin(cmd, &args) {
+                            Ok(_) => break 'repl,
+                            Err(e) => {
+                                match e {
+                                    UNKNOWN_BUILTIN => {} // continue to exec
+                                    s => {
+                                        println!("{}", s);
+                                        break 'repl;
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     let splited = input.split('|').collect::<Vec<_>>();
@@ -225,4 +254,30 @@ fn main() -> i32 {
             }
         }
     }
+}
+
+const UNKNOWN_BUILTIN: &'static str = "unknown builtin command!";
+const WRONG_NUM_ARGS: &'static str = "wrong number of args!";
+fn exec_builtin(cmd: &str, args: &[String]) -> Result<(), &'static str> {
+    match cmd.trim_end_matches('\0') {
+        "cd" => {
+            let path = match args.len() {
+                0 => "/\0",
+                1 => args[0].as_str(),
+                _ => return Err(WRONG_NUM_ARGS),
+            };
+            if chdir(path) == -1 {
+                return Err("Error cd");
+            }
+        }
+        "pwd" => {
+            let mut path = [0; 256];
+            if getcwd(&mut path[..]) == -1 {
+                return Err("Error pwd");
+            }
+            println!("{}", core::str::from_utf8(&path).unwrap());
+        }
+        _ => return Err(UNKNOWN_BUILTIN),
+    }
+    Ok(())
 }

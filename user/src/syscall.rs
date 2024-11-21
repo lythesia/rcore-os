@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::{SignalAction, Stat, TimeVal};
+use crate::{Dirent, SignalAction, Stat, TimeVal};
 
 const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_DUP: usize = 24;
@@ -11,6 +11,7 @@ const SYSCALL_CHDIR: usize = 49;
 const SYSCALL_OPENAT: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_PIPE: usize = 59;
+const SYSCALL_GETDENTS: usize = 61;
 const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_FSTAT: usize = 80;
@@ -186,4 +187,13 @@ pub fn sys_sigprocmask(mask: u32) -> isize {
 
 pub fn sys_sigreturn() -> isize {
     syscall!(SYSCALL_SIGRETURN)
+}
+
+pub fn sys_getdents(fd: usize, entries: &mut [Dirent]) -> isize {
+    syscall!(
+        SYSCALL_GETDENTS,
+        fd,
+        entries.as_mut_ptr() as usize,
+        entries.len()
+    )
 }

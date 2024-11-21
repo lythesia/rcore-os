@@ -447,6 +447,7 @@ impl DiskInode {
 
 /// A directory entry
 #[repr(C)]
+#[derive(Clone)]
 pub struct DirEntry {
     name: [u8; NAME_LENGTH_LIMIT + 1], // filename len at most 27 + '\0'
     inode_number: u32,

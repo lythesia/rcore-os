@@ -229,13 +229,14 @@ pub fn link(oldpath: &str, newpath: &str) -> isize {
 }
 
 #[repr(C)]
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Stat {
     pub dev: u64,
     pub ino: u64,
     pub mode: StatMode,
     pub nlink: u32,
-    pad: [u64; 7],
+    pub size: u64,
+    pad: [u64; 6],
 }
 impl Stat {
     pub fn new() -> Self {
@@ -374,4 +375,34 @@ pub fn sigprocmask(mask: u32) -> isize {
 
 pub fn sigreturn() -> isize {
     sys_sigreturn()
+}
+
+/// The max length of inode name
+const NAME_LENGTH_LIMIT: usize = 27;
+
+#[repr(C, align(32))]
+#[derive(Clone, Default)]
+pub struct Dirent {
+    pub ftype: FileType,
+    pub name: [u8; NAME_LENGTH_LIMIT],
+    pub next_offset: u32,
+}
+
+bitflags! {
+    #[derive(Default)]
+    pub struct FileType: u8 {
+        const UNKNOWN = 0;
+        const DIR = 1 << 0;
+        const REG = 1 << 1;
+    }
+}
+
+impl Dirent {
+    pub fn name(&self) -> &str {
+        core::str::from_utf8(&self.name[..]).unwrap()
+    }
+}
+
+pub fn getdents(fd: usize, entries: &mut [Dirent]) -> isize {
+    sys_getdents(fd, entries)
 }

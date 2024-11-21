@@ -100,6 +100,40 @@ impl Inode {
         .map(f)
     }
 
+    /// Get inodes of dir entries
+    pub fn dirents(&self, cursor: u32) -> Vec<(String, Arc<Inode>)> {
+        let fs = self.fs.lock();
+        let cursor = cursor as usize;
+        self.read_disk_inode(|disk_inode| {
+            assert!(disk_inode.is_dir());
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            if cursor >= file_count {
+                return Vec::new();
+            }
+            let mut v = Vec::with_capacity(file_count - cursor);
+            let mut dirent = DirEntry::new_empty();
+            for i in cursor..file_count {
+                assert_eq!(
+                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device),
+                    DIRENT_SZ
+                );
+                let inode_id = dirent.inode_number();
+                let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
+                v.push((
+                    String::from(dirent.name()),
+                    Arc::new(Self::new(
+                        inode_id,
+                        block_id,
+                        block_offset,
+                        self.fs.clone(),
+                        self.block_device.clone(),
+                    )),
+                ))
+            }
+            v
+        })
+    }
+
     /// Find inode under current inode(recursively) by name
     pub fn find(&self, path: &str) -> Option<Arc<Inode>> {
         let fs = self.fs.lock();
@@ -246,7 +280,6 @@ impl Inode {
 
     fn clear_locked(&self, fs: &mut EasyFileSystem) {
         self.modify_disk_inode(|disk_inode| {
-            assert!(disk_inode.is_file());
             let size = disk_inode.size;
             let data_blocks_dealloc = disk_inode.clear_size(&self.block_device);
             assert_eq!(
