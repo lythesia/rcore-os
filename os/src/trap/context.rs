@@ -15,7 +15,7 @@ pub struct TrapContext {
     pub kernel_satp: usize,
     /// 当前应用在内核地址空间中的内核栈栈顶的虚拟地址
     pub kernel_sp: usize,
-    ///  内核中 trap handler 入口点的虚拟地址
+    /// 内核中 trap handler 入口点的虚拟地址
     pub trap_handler: usize,
 }
 

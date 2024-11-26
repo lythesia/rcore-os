@@ -15,10 +15,10 @@ pub enum MMapType {
 pub fn handle_page_fault(fault_addr: usize) -> bool {
     let fault_va: VirtAddr = fault_addr.into();
     let fault_vpn = fault_va.floor();
-    let task = processor::current_task().unwrap();
-    let mut task_inner = task.inner_exclusive_access();
+    let process = processor::current_process();
+    let mut inner = process.inner_exclusive_access();
 
-    match task_inner.memory_set.translate(fault_vpn) {
+    match inner.memory_set.translate(fault_vpn) {
         // already mapped
         // 如果上一次page_fault被处理了, 这里pte就是valid, 所以返回false
         // 换句话说这次page_fault不是缺页, 而是其他异常, 比如读写权限问题
@@ -26,7 +26,7 @@ pub fn handle_page_fault(fault_addr: usize) -> bool {
         _ => {}
     }
 
-    let MMapReserve { range, perm, ty } = match task_inner
+    let MMapReserve { range, perm, ty } = match inner
         .mmap_mapped
         .iter()
         .find(|v| v.range.contains(fault_vpn))
@@ -39,13 +39,11 @@ pub fn handle_page_fault(fault_addr: usize) -> bool {
         MMapType::Memory => {
             let start_va = range.get_start().into();
             let end_va = range.get_end().into();
-            task_inner
-                .memory_set
-                .insert_framed_area(start_va, end_va, perm);
+            inner.memory_set.insert_framed_area(start_va, end_va, perm);
         }
         MMapType::File => {
             // check file_mappings
-            let mapping = match task_inner
+            let mapping = match inner
                 .file_mappings
                 .iter_mut()
                 .find(|v| v.contains_va(&fault_va))
@@ -58,7 +56,7 @@ pub fn handle_page_fault(fault_addr: usize) -> bool {
             // phys frame allocated
             let (ppn, range, is_shared) = mapping.map(fault_va).unwrap();
             // setup va-pa mapping
-            task_inner.memory_set.map(fault_vpn, ppn, perm);
+            inner.memory_set.map(fault_vpn, ppn, perm);
 
             // load file
             if !is_shared {

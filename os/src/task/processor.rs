@@ -8,6 +8,7 @@ use super::{
     manager,
     switch::__switch,
     task::{TaskControlBlock, TaskStatus},
+    ProcessControlBlock,
 };
 
 lazy_static! {
@@ -64,37 +65,30 @@ pub fn current_task() -> Option<Arc<TaskControlBlock>> {
     PROCESSOR.exclusive_access().current()
 }
 
+pub fn current_process() -> Arc<ProcessControlBlock> {
+    current_task().unwrap().process.upgrade().unwrap()
+}
+
 pub fn current_user_token() -> usize {
     let task = current_task().unwrap();
-    let token = task.inner_exclusive_access().get_user_token();
-    token
+    task.get_user_token()
 }
 
 pub fn current_trap_cx() -> &'static mut TrapContext {
-    let task = current_task().unwrap();
-    let cx = task.inner_exclusive_access().get_trap_cx();
-    cx
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_trap_cx()
 }
 
-/// stop_watch <- now, return time of `last stop` until `now`
-pub fn refresh_stop_watch() -> usize {
-    PROCESSOR.exclusive_access().refresh_stop_watch()
-}
-
-pub fn user_time_start() {
-    let task = current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
-    // 到user_time_start为止都是kernel_time, 故累加
-    // 隐含另一个意思, 从现在开始是user_time
-    inner.kernel_time += refresh_stop_watch();
-}
-
-pub fn user_time_end() {
-    let task = current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
-    // 类似上面, 到user_time_end为止都是user_time, 故累加
-    // 隐含另一个意思, 从现在开始是kernel_time
-    inner.user_time += refresh_stop_watch();
+pub fn current_trap_cx_user_va() -> usize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .trap_cx_user_va()
 }
 
 /// 从 idle 控制流通过任务调度切换到某个任务开始执行
@@ -121,6 +115,8 @@ pub fn run_tasks() {
             unsafe {
                 __switch(idle_task_cx_ptr, next_task_cx_ptr);
             }
+        } else {
+            // no available task
         }
     }
 }
@@ -133,4 +129,25 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
+}
+
+/// stop_watch <- now, return time of `last stop` until `now`
+pub fn refresh_stop_watch() -> usize {
+    PROCESSOR.exclusive_access().refresh_stop_watch()
+}
+
+pub fn user_time_start() {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    // 到user_time_start为止都是kernel_time, 故累加
+    // 隐含另一个意思, 从现在开始是user_time
+    inner.kernel_time += refresh_stop_watch();
+}
+
+pub fn user_time_end() {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    // 类似上面, 到user_time_end为止都是user_time, 故累加
+    // 隐含另一个意思, 从现在开始是kernel_time
+    inner.user_time += refresh_stop_watch();
 }

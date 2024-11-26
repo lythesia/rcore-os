@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 use riscv::register::satp;
 
 use crate::{
-    config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE},
+    config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE},
     mm::address::StepByOne,
     sync::UPSafeCell,
 };
@@ -176,14 +176,6 @@ impl MemorySet {
         memory_set.map_trampoline();
 
         // map kernel sections
-        // println!(".text [{:#x}, {:#x})", stext as usize, etext as usize);
-        // println!(".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
-        // println!(".data [{:#x}, {:#x})", sdata as usize, edata as usize);
-        // println!(
-        //     ".bss [{:#x}, {:#x})",
-        //     sbss_with_stack as usize, ebss as usize
-        // );
-
         // println!("mapping kernel .text section");
         memory_set.push(
             MapArea::new(
@@ -310,30 +302,10 @@ impl MemorySet {
         let mut user_stack_bottom: usize = max_end_va.into();
         // guard page
         user_stack_bottom += PAGE_SIZE;
-        let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
-        memory_set.push(
-            MapArea::new(
-                user_stack_bottom.into(),
-                user_stack_top.into(),
-                MapType::Framed,
-                MapPermission::R | MapPermission::W | MapPermission::U,
-            ),
-            None,
-        );
-        // map TrapContext
-        memory_set.push(
-            MapArea::new(
-                TRAP_CONTEXT.into(),
-                TRAMPOLINE.into(),
-                MapType::Framed,
-                MapPermission::R | MapPermission::W,
-            ),
-            None,
-        );
 
         (
             memory_set,
-            user_stack_top,
+            user_stack_bottom,
             elf.header.pt2.entry_point() as usize,
         )
     }
@@ -474,5 +446,4 @@ pub fn remap_test() {
             .executable(),
         false
     );
-    println!("remap_test passed!");
 }

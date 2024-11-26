@@ -20,3 +20,25 @@ impl Default for SignalAction {
 pub struct SignalActions {
     pub table: [SignalAction; MAX_SIG + 1],
 }
+
+impl SignalActions {
+    pub fn is_masked(&self, signum: usize, signal: SignalFlags) -> bool {
+        assert!(signum <= MAX_SIG);
+        self.table[signum].mask.contains(signal)
+    }
+
+    pub fn get_handler(&self, signum: usize) -> usize {
+        assert!(signum <= MAX_SIG);
+        self.table[signum].handler
+    }
+
+    pub fn get_action(&self, signum: usize) -> SignalAction {
+        assert!(signum <= MAX_SIG);
+        self.table[signum]
+    }
+
+    pub fn set_action(&mut self, signum: usize, action: SignalAction) {
+        assert!(signum <= MAX_SIG);
+        self.table[signum] = action;
+    }
+}

@@ -31,8 +31,7 @@ fn main(argc: usize, argv: &[&str]) -> i32 {
         n = match getdents(fd as usize, &mut entries.as_mut_slice()[..n]) {
             -1 => {
                 println!("Error read dir {}", path);
-                exit(-1);
-                unreachable!()
+                exit(-1)
             }
             0 => break,
             v => v as usize,

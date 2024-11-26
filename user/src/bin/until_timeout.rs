@@ -10,7 +10,6 @@ use user_lib::{exec, fork, get_time, kill, waitpid, waitpid_n, SignalFlags};
 pub fn main(argc: usize, argv: &[&str]) -> i32 {
     assert_eq!(argc, 3, "{} PROG TIMEOUT(ms)", argv[0]);
     let timeout_ms = argv[2]
-        .trim_end_matches(|c| c == '\0')
         .parse::<isize>()
         .expect("Error when parsing timeout!");
     let pid = fork() as usize;

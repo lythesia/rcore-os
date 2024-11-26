@@ -6,17 +6,19 @@ use lazy_static::lazy_static;
 
 use crate::sync::UPSafeCell;
 
-use super::task::TaskControlBlock;
+use super::{
+    process::ProcessControlBlock,
+    task::{TaskControlBlock, TaskStatus},
+};
 
 lazy_static! {
     pub static ref TASK_MANAGER: UPSafeCell<TaskManager> =
         unsafe { UPSafeCell::new(TaskManager::new()) };
-    pub static ref PID2TCB: UPSafeCell<BTreeMap<usize, Arc<TaskControlBlock>>> =
+    pub static ref PID2PCB: UPSafeCell<BTreeMap<usize, Arc<ProcessControlBlock>>> =
         unsafe { UPSafeCell::new(BTreeMap::new()) };
 }
 
 pub struct TaskManager {
-    /// 使用Arc而非TCB本身, 因为经常需要被放入/取出, 拷贝开销较大, 故使用Arc指针; 其次Arc共享更方便
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
@@ -35,12 +37,20 @@ impl TaskManager {
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
         self.ready_queue.pop_front()
     }
+
+    pub fn remove(&mut self, task: Arc<TaskControlBlock>) {
+        if let Some((id, _)) = self
+            .ready_queue
+            .iter()
+            .enumerate()
+            .find(|(_, t)| Arc::as_ptr(t) == Arc::as_ptr(&task))
+        {
+            self.ready_queue.remove(id);
+        }
+    }
 }
 
 pub fn add_task(task: Arc<TaskControlBlock>) {
-    PID2TCB
-        .exclusive_access()
-        .insert(task.getpid(), task.clone());
     TASK_MANAGER.exclusive_access().add(task);
 }
 
@@ -48,13 +58,27 @@ pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
     TASK_MANAGER.exclusive_access().fetch()
 }
 
-pub fn pid2task(pid: usize) -> Option<Arc<TaskControlBlock>> {
-    let map = PID2TCB.exclusive_access();
-    map.get(&pid).map(Arc::clone)
+pub fn wakeup_task(task: Arc<TaskControlBlock>) {
+    let mut inner = task.inner_exclusive_access();
+    inner.task_status = TaskStatus::Ready;
+    drop(inner);
+    add_task(task);
 }
 
-pub fn remove_from_pid2task(pid: usize) {
-    if PID2TCB.exclusive_access().remove(&pid).is_none() {
+pub fn remove_task(task: Arc<TaskControlBlock>) {
+    TASK_MANAGER.exclusive_access().remove(task);
+}
+
+pub fn insert_into_pid2process(pid: usize, process: Arc<ProcessControlBlock>) {
+    PID2PCB.exclusive_access().insert(pid, process);
+}
+
+pub fn pid2process(pid: usize) -> Option<Arc<ProcessControlBlock>> {
+    PID2PCB.exclusive_access().get(&pid).map(Arc::clone)
+}
+
+pub fn remove_from_pid2process(pid: usize) {
+    if PID2PCB.exclusive_access().remove(&pid).is_none() {
         panic!("cannot find pid {} in pid2task!", pid);
     }
 }

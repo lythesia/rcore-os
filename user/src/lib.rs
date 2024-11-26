@@ -46,13 +46,13 @@ pub extern "C" fn _start(argc: usize, argv: usize) -> ! {
         // append arg as str
         v.push(
             core::str::from_utf8(unsafe {
-                core::slice::from_raw_parts(str_start as *const u8, len + 1) // plus terminate nul
+                // here we didn't plus '\0', but we know there IS one '\0' added by `sys_exec` at kernel side
+                core::slice::from_raw_parts(str_start as *const u8, len)
             })
             .unwrap(),
         );
     }
-    exit(main(argc, v.as_slice()));
-    panic!("unreachable after sys_exit!")
+    exit(main(argc, v.as_slice()))
 }
 
 // "weak" symbol here coz "main" defined under src/bin/*.rs are actual "main"s
@@ -62,6 +62,23 @@ pub extern "C" fn _start(argc: usize, argv: usize) -> ! {
 #[linkage = "weak"]
 fn main(_argc: usize, _argv: &[&str]) -> i32 {
     panic!("Cannot find main!")
+}
+
+// utils
+#[macro_export]
+macro_rules! vstore {
+    ($var: expr, $value: expr) => {
+        unsafe {
+            core::ptr::write_volatile(core::ptr::addr_of_mut!($var), $value);
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! vload {
+    ($var: expr) => {
+        unsafe { core::ptr::read_volatile(core::ptr::addr_of!($var)) }
+    };
 }
 
 // syscall defs
@@ -75,14 +92,20 @@ bitflags! {
     }
 }
 
+// fn assert_str_with_nul(s: &str) {
+//     let last = unsafe {
+//         let ptr = s.as_ptr().add(s.len());
+//         *ptr
+//     };
+//     assert_eq!(last, 0)
+// }
+
 const AT_FDCWD: isize = -100;
 pub fn open(path: &str, flags: OpenFlags) -> isize {
-    assert!(path.ends_with('\0'));
     sys_openat(AT_FDCWD, path, flags.bits)
 }
 
 pub fn openat(fd: usize, path: &str, flags: OpenFlags) -> isize {
-    assert!(path.ends_with('\0'));
     sys_openat(fd as isize, path, flags.bits)
 }
 
@@ -98,7 +121,7 @@ pub fn write(fd: usize, buf: &[u8]) -> isize {
     sys_write(fd, buf)
 }
 
-pub fn exit(exit_code: i32) -> isize {
+pub fn exit(exit_code: i32) -> ! {
     sys_exit(exit_code)
 }
 
@@ -127,10 +150,7 @@ pub fn get_time() -> isize {
 }
 
 pub fn sleep(ms: usize) {
-    let start = get_time();
-    while get_time() < start + ms as isize {
-        sys_yield();
-    }
+    let _ = sys_sleep(ms);
 }
 
 bitflags! {
@@ -194,37 +214,27 @@ pub fn waitpid_n(pid: usize, exit_code: &mut i32) -> isize {
     sys_waitpid(pid as isize, exit_code)
 }
 
-pub fn halt() -> isize {
-    sys_halt()
-}
-
 pub fn getcwd(path: &mut [u8]) -> isize {
     sys_getcwd(path)
 }
 
 pub fn mkdir(path: &str) -> isize {
-    assert!(path.ends_with('\0'));
     sys_mkdirat(AT_FDCWD, path)
 }
 
 pub fn mkdirat(fd: usize, path: &str) -> isize {
-    assert!(path.ends_with('\0'));
     sys_mkdirat(fd as isize, path)
 }
 
 pub fn chdir(path: &str) -> isize {
-    assert!(path.ends_with('\0'));
     sys_chdir(path)
 }
 
 pub fn unlink(path: &str) -> isize {
-    assert!(path.ends_with('\0'));
     sys_unlinkat(AT_FDCWD, path)
 }
 
 pub fn link(oldpath: &str, newpath: &str) -> isize {
-    assert!(oldpath.ends_with('\0'));
-    assert!(newpath.ends_with('\0'));
     sys_linkat(AT_FDCWD, oldpath, newpath)
 }
 
@@ -405,4 +415,63 @@ impl Dirent {
 
 pub fn getdents(fd: usize, entries: &mut [Dirent]) -> isize {
     sys_getdents(fd, entries)
+}
+
+pub fn thread_create(entry: usize, arg: usize) -> isize {
+    sys_thread_create(entry, arg)
+}
+
+pub fn gettid() -> isize {
+    sys_gettid()
+}
+
+pub fn waittid(tid: usize) -> isize {
+    loop {
+        match sys_waittid(tid) {
+            -2 => {
+                yield_();
+            }
+            exit_code => return exit_code,
+        }
+    }
+}
+
+pub fn mutex_create() -> isize {
+    sys_mutex_create(false)
+}
+
+pub fn mutex_blocking_create() -> isize {
+    sys_mutex_create(true)
+}
+
+pub fn mutex_lock(mutex_id: usize) -> isize {
+    sys_mutex_lock(mutex_id)
+}
+
+pub fn mutex_unlock(mutex_id: usize) -> isize {
+    sys_mutex_unlock(mutex_id)
+}
+
+pub fn semaphore_create(res_count: usize) -> isize {
+    sys_semaphore_create(res_count)
+}
+
+pub fn semaphore_acquire(sem_id: usize) -> isize {
+    sys_semaphore_down(sem_id)
+}
+
+pub fn semaphore_release(sem_id: usize) -> isize {
+    sys_semaphore_up(sem_id)
+}
+
+pub fn condvar_create() -> isize {
+    sys_condvar_create()
+}
+
+pub fn condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
+    sys_condvar_wait(condvar_id, mutex_id)
+}
+
+pub fn condvar_signal(condvar_id: usize) -> isize {
+    sys_condvar_signal(condvar_id)
 }

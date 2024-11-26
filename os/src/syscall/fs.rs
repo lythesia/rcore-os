@@ -6,15 +6,15 @@ use crate::{
     cast::DowncastArc,
     fs::{self, make_pipe, name_for_inode, unlink_file_at, File, OSInode, OpenFlags, ROOT_INODE},
     mm::{self, translated_byte_buffer, UserBuffer},
-    task::{self, TaskControlBlock},
+    task::{self, ProcessControlBlock},
 };
 
 use super::bail_exit;
 
 /// write buf of length `len` to a file with `fd`
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
-    let task = task::current_task().unwrap();
-    let inner = task.inner_exclusive_access();
+    let proc = task::current_process();
+    let inner = proc.inner_exclusive_access();
     let token = inner.get_user_token();
 
     match inner.fd_table.get(fd) {
@@ -33,8 +33,8 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
 
 /// read buf of length `len` from a file with `fd`
 pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
-    let task = task::current_task().unwrap();
-    let inner = task.inner_exclusive_access();
+    let proc = task::current_process();
+    let inner = proc.inner_exclusive_access();
     let token = inner.get_user_token();
 
     match inner.fd_table.get(fd) {
@@ -61,13 +61,13 @@ fn base_inode(
     abs_path: &str,
     open_read: bool,
     open_write: bool,
-    curr_task: &Arc<TaskControlBlock>,
+    curr_proc: &Arc<ProcessControlBlock>,
 ) -> Result<Arc<Inode>, isize> {
     let base = match (abs_path.starts_with("/"), fd == AT_FDCWD) {
         (true, _) => ROOT_INODE.clone(),
         (_, true) => {
             // from cwd
-            let cwd = curr_task.inner_exclusive_access().cwd.clone();
+            let cwd = curr_proc.inner_exclusive_access().cwd.clone();
             let path = name_for_inode(&cwd);
             // ensure cwd
             match fs::find_file(&path) {
@@ -77,7 +77,7 @@ fn base_inode(
         }
         (_, false) => {
             // from fd specified, fd must be open
-            match curr_task.inner_exclusive_access().fd_table.get(fd as usize) {
+            match curr_proc.inner_exclusive_access().fd_table.get(fd as usize) {
                 Some(Some(file)) => {
                     let file_clone = file.clone();
                     match file_clone.downcast_arc::<OSInode>() {
@@ -103,13 +103,13 @@ pub fn sys_openat(fd: isize, path: *const u8, flags: u32) -> isize {
     let open_flags = OpenFlags::from_bits_truncate(flags);
     let (or, ow) = open_flags.read_write();
 
-    let curr_task = task::current_task().unwrap();
-    let token = curr_task.inner_exclusive_access().get_user_token();
+    let proc = task::current_process();
+    let token = proc.inner_exclusive_access().get_user_token();
     let path = mm::translated_str(token, path);
 
-    let base = bail_exit!(base_inode(fd, &path, or, ow, &curr_task));
+    let base = bail_exit!(base_inode(fd, &path, or, ow, &proc));
     if let Some(inode) = fs::open_file_at(&base, &path, open_flags) {
-        let mut inner = curr_task.inner_exclusive_access();
+        let mut inner = proc.inner_exclusive_access();
         let fd = inner.alloc_fd();
         inner.fd_table[fd] = Some(inode);
         fd as isize
@@ -119,8 +119,8 @@ pub fn sys_openat(fd: isize, path: *const u8, flags: u32) -> isize {
 }
 
 pub fn sys_close(fd: usize) -> isize {
-    let curr_task = task::current_task().unwrap();
-    let mut inner = curr_task.inner_exclusive_access();
+    let proc = task::current_process();
+    let mut inner = proc.inner_exclusive_access();
     if let Some(opt) = inner.fd_table.get_mut(fd) {
         match opt.take() {
             Some(_) => 0,
@@ -132,11 +132,11 @@ pub fn sys_close(fd: usize) -> isize {
 }
 
 pub fn sys_getcwd(ptr: *mut u8, len: usize) -> isize {
-    let curr_task = task::current_task().unwrap();
-    let task_inner = curr_task.inner_exclusive_access();
-    let token = task_inner.get_user_token();
+    let proc = task::current_process();
+    let inner = proc.inner_exclusive_access();
+    let token = inner.get_user_token();
 
-    let cwd = name_for_inode(&task_inner.cwd);
+    let cwd = name_for_inode(&inner.cwd);
     if cwd.len() + 1 > len {
         return -1;
     }
@@ -152,11 +152,11 @@ pub fn sys_getcwd(ptr: *mut u8, len: usize) -> isize {
 }
 
 pub fn sys_mkdirat(fd: isize, path: *const u8) -> isize {
-    let curr_task = task::current_task().unwrap();
-    let token = curr_task.inner_exclusive_access().get_user_token();
+    let proc = task::current_process();
+    let token = proc.inner_exclusive_access().get_user_token();
     let path = mm::translated_str(token, path);
 
-    let mut base = bail_exit!(base_inode(fd, &path, true, true, &curr_task));
+    let mut base = bail_exit!(base_inode(fd, &path, true, true, &proc));
     for name in path.split("/").filter(|s| !s.is_empty()) {
         match base.create_dir(name) {
             Some(created) => base = created,
@@ -175,17 +175,17 @@ pub fn sys_mkdirat(fd: isize, path: *const u8) -> isize {
 }
 
 pub fn sys_chdir(path: *const u8) -> isize {
-    let curr_task = task::current_task().unwrap();
-    let token = curr_task.inner_exclusive_access().get_user_token();
+    let curr_proc = task::current_process();
+    let token = curr_proc.inner_exclusive_access().get_user_token();
     let path = mm::translated_str(token, path);
 
-    let base = bail_exit!(base_inode(AT_FDCWD, &path, true, true, &curr_task));
+    let base = bail_exit!(base_inode(AT_FDCWD, &path, true, true, &curr_proc));
     match base.find(&path) {
         Some(d) => {
             if !d.is_dir() {
                 return -1;
             }
-            curr_task.inner_exclusive_access().cwd = d;
+            curr_proc.inner_exclusive_access().cwd = d;
         }
         _ => {
             return -1;
@@ -200,11 +200,11 @@ pub fn sys_unlinkat(fd: isize, path: *const u8) -> isize {
         return -1;
     }
 
-    let curr_task = task::current_task().unwrap();
-    let token = curr_task.inner_exclusive_access().get_user_token();
+    let curr_proc = task::current_process();
+    let token = curr_proc.inner_exclusive_access().get_user_token();
     let path = mm::translated_str(token, path);
 
-    let base = bail_exit!(base_inode(AT_FDCWD, &path, true, true, &curr_task));
+    let base = bail_exit!(base_inode(AT_FDCWD, &path, true, true, &curr_proc));
     if unlink_file_at(&base, &path) {
         0
     } else {
@@ -218,13 +218,13 @@ pub fn sys_linkat(fd: isize, oldpath: *const u8, newpath: *const u8) -> isize {
         return -1;
     }
 
-    let curr_task = task::current_task().unwrap();
-    let token = curr_task.inner_exclusive_access().get_user_token();
+    let proc = task::current_process();
+    let token = proc.inner_exclusive_access().get_user_token();
     let oldpath = mm::translated_str(token, oldpath);
     let newpath = mm::translated_str(token, newpath);
 
-    let oldbase = bail_exit!(base_inode(AT_FDCWD, &oldpath, true, true, &curr_task));
-    let newbase = bail_exit!(base_inode(AT_FDCWD, &newpath, true, true, &curr_task));
+    let oldbase = bail_exit!(base_inode(AT_FDCWD, &oldpath, true, true, &proc));
+    let newbase = bail_exit!(base_inode(AT_FDCWD, &newpath, true, true, &proc));
 
     // parent.link(name, old_inode)
     // old must exist
@@ -278,8 +278,8 @@ bitflags! {
 }
 
 pub fn sys_fstat(fd: usize, ptr: *mut Stat) -> isize {
-    let curr_task = task::current_task().unwrap();
-    let task_inner = curr_task.inner_exclusive_access();
+    let proc = task::current_process();
+    let task_inner = proc.inner_exclusive_access();
 
     // fd must exist
     let inode = match task_inner.fd_table.get(fd) {
@@ -319,8 +319,8 @@ pub fn sys_fstat(fd: usize, ptr: *mut Stat) -> isize {
 }
 
 pub fn sys_pipe(pipe: *mut usize) -> isize {
-    let task = task::current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
+    let proc = task::current_process();
+    let mut inner = proc.inner_exclusive_access();
     let token = inner.get_user_token();
     let (pipe_read, pipe_write) = make_pipe();
     let read_fd = inner.alloc_fd();
@@ -333,8 +333,8 @@ pub fn sys_pipe(pipe: *mut usize) -> isize {
 }
 
 pub fn sys_dup(fd: usize) -> isize {
-    let task = task::current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
+    let proc = task::current_process();
+    let mut inner = proc.inner_exclusive_access();
     let file = match inner.fd_table.get(fd) {
         Some(Some(file)) => file.clone(),
         _ => return -1,
@@ -364,8 +364,8 @@ bitflags! {
 }
 
 pub fn sys_getdents(fd: usize, ptr: *mut Dirent, len: usize) -> isize {
-    let task = task::current_task().unwrap();
-    let inner = task.inner_exclusive_access();
+    let proc = task::current_process();
+    let inner = proc.inner_exclusive_access();
     let token = inner.get_user_token();
 
     let file = match inner.fd_table.get(fd) {

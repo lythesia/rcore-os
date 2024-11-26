@@ -148,7 +148,6 @@ fn run(f: fn()) -> bool {
     if pid == 0 {
         f();
         exit(0);
-        panic!("unreachable in forked process");
     } else {
         let mut exit_code: i32 = 0;
         wait(&mut exit_code);

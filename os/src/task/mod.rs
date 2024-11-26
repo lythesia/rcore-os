@@ -1,47 +1,51 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use context::TaskContext;
+use id::TaskUserRes;
 use lazy_static::lazy_static;
-use manager::remove_from_pid2task;
-use task::TaskStatus;
+use manager::{remove_from_pid2process, remove_task};
 
-use crate::fs;
+use crate::{fs, timer::remove_timer};
 
 mod action;
 mod context;
+mod id;
 mod manager;
 mod mem;
-mod pid;
+mod process;
 mod processor;
 mod signal;
 mod switch;
 mod task;
 
-pub use action::{SignalAction, SignalActions};
-pub use manager::{add_task, pid2task};
+pub use action::*;
+pub use manager::{add_task, pid2process, wakeup_task};
 pub use mem::*;
+pub use process::{FileMapping, MMapReserve, MapRange, ProcessControlBlock};
 pub use processor::{
-    current_task, current_trap_cx, current_user_token, run_tasks, user_time_end, user_time_start,
+    current_process, current_task, current_trap_cx, current_trap_cx_user_va, current_user_token,
+    run_tasks, user_time_end, user_time_start,
 };
 pub use signal::{SignalFlags, MAX_SIG};
-pub use task::{FileMapping, MMapReserve, MapRange, TaskControlBlock};
+pub use task::{TaskControlBlock, TaskStatus};
 
 lazy_static! {
-    pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new({
+    pub static ref INITPROC: Arc<ProcessControlBlock> = {
         let inode = fs::open_file("initproc", fs::OpenFlags::RDONLY).unwrap();
         let elf = inode.read_all();
-        TaskControlBlock::new(&elf)
-    });
+        ProcessControlBlock::new(&elf)
+    };
 }
 
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
     let task = processor::take_current_task().unwrap();
-
     // 当仅有一个任务的时候, suspend_current_and_run_next 的效果是会继续执行这个任务
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
-    // curr_task挂起, 应当停表累加kernel_time, 而__switch耗时应当不算入curr/next_task的kernel_time
-    task_inner.kernel_time += processor::refresh_stop_watch();
+    {
+        let process = task.process.upgrade().unwrap();
+        process.inner_exclusive_access().kernel_time += processor::refresh_stop_watch();
+    }
     task_inner.task_status = TaskStatus::Ready;
     drop(task_inner);
 
@@ -49,54 +53,95 @@ pub fn suspend_current_and_run_next() {
     processor::schedule(task_cx_ptr);
 }
 
-const IDLE_PID: usize = 0;
+pub fn block_current_and_run_next() {
+    // There must be an application running.
+    let task = processor::take_current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
+    {
+        let process = task.process.upgrade().unwrap();
+        process.inner_exclusive_access().kernel_time += processor::refresh_stop_watch();
+    }
+    task_inner.task_status = TaskStatus::Blocked;
+    drop(task_inner);
+    processor::schedule(task_cx_ptr);
+}
+
 pub fn exit_current_and_run_next(exit_code: i32) {
     // There must be an application running.
     let task = processor::take_current_task().unwrap();
-
-    let pid = task.getpid();
-    if pid == IDLE_PID {
-        println!(
-            "[kernel] Idle process exit with exit_code {} ...",
-            exit_code
-        );
-        if exit_code != 0 {
-            crate::sbi::shutdown(true)
-        } else {
-            crate::sbi::shutdown(false)
-        }
-    }
-
-    // must remove from pid2task, else sys_wait will see this task ref_count not 1
-    remove_from_pid2task(pid);
+    let process = task.process.upgrade().unwrap();
 
     let mut task_inner = task.inner_exclusive_access();
-    // curr_task完成
-    task_inner.kernel_time += processor::refresh_stop_watch();
-    task_inner.task_status = TaskStatus::Zombie;
-    task_inner.exit_code = exit_code;
-    // access initproc TCB exclusively
-    {
-        let mut initproc_inner = INITPROC.inner_exclusive_access();
-        for child in task_inner.children.iter() {
-            child.inner_exclusive_access().parent = Some(Arc::downgrade(&INITPROC));
-            initproc_inner.children.push(child.clone());
+    let tid = task_inner.res.as_ref().unwrap().tid;
+    // set exit_code
+    task_inner.exit_code = Some(exit_code);
+    // dealloc user res
+    task_inner.res = None;
+    drop(task_inner);
+    drop(task);
+    // terminate process if it's main thread
+    if tid == 0 {
+        let pid = process.getpid();
+        if pid == id::IDLE_PID {
+            println!(
+                "[kernel] Idle process exit with exit_code {} ...",
+                exit_code
+            );
+            if exit_code != 0 {
+                crate::sbi::shutdown(true)
+            } else {
+                crate::sbi::shutdown(false)
+            }
+        }
+        // must remove from pid2task, else sys_wait will see this task ref_count not 1
+        remove_from_pid2process(pid);
+        let mut process_inner = process.inner_exclusive_access();
+        // curr_task完成
+        process_inner.kernel_time += processor::refresh_stop_watch();
+        process_inner.is_zombie = true;
+        process_inner.exit_code = exit_code;
+        // access initproc TCB exclusively
+        {
+            let mut initproc_inner = INITPROC.inner_exclusive_access();
+            for child in process_inner.children.iter() {
+                child.inner_exclusive_access().parent = Some(Arc::downgrade(&INITPROC));
+                initproc_inner.children.push(child.clone());
+            }
+        }
+        // dealloc user res of all threads
+        let mut recycle_res = Vec::<TaskUserRes>::new();
+        for task in process_inner.tasks.iter().filter(|t| t.is_some()) {
+            let task = task.as_ref().unwrap();
+            remove_inactive_task(task.clone());
+            let mut task_inner = task.inner_exclusive_access();
+            if let Some(res) = task_inner.res.take() {
+                recycle_res.push(res);
+            }
+        }
+        // dealloc_tid and dealloc_user_res require access to PCB inner, so we
+        // need to collect those user res first, then release process_inner
+        // for now to avoid deadlock/double borrow problem.
+        drop(process_inner);
+        recycle_res.clear();
+
+        let mut process_inner = process.inner_exclusive_access();
+        process_inner.children.clear();
+        // deallocate user space
+        process_inner.memory_set.recycle_data_pages();
+        // drop fd's
+        process_inner.fd_table.clear();
+        // write back dirty pages
+        for mapping in &process_inner.file_mappings {
+            mapping.sync();
+        }
+        // recycle all threads except main thread, coz it's currently executing!
+        // see: https://github.com/rcore-os/rCore-Tutorial-Book-v3/issues/136#issuecomment-1955838457
+        while process_inner.tasks.len() > 1 {
+            process_inner.tasks.pop();
         }
     }
-
-    task_inner.children.clear();
-    // deallocate user space
-    task_inner.memory_set.recycle_data_pages();
-    // write back dirty pages
-    for mapping in &task_inner.file_mappings {
-        mapping.sync();
-    }
-    drop(task_inner);
-
-    // drop task manually to maintain rc correctly
-    // drop以后task的Arc不再存在于TaskManager nor Processor, 只可能在其parent的children vec中, 如此waitpid调用才能
-    // 从自己的children中找到zombie的task, 获取其最后有用的信息, 比如exit_code, kernel/user_time等
-    drop(task);
+    drop(process);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
     // _unused只是一个placeholder, 代码上看这里调用了__switch(_unused, idle), 即保存当前的task_cx到_unused并切换的idle_task
@@ -108,40 +153,59 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     processor::schedule(&mut _unused as *mut TaskContext);
 }
 
+pub fn add_initproc() {
+    let _init = INITPROC.clone();
+}
+
 pub fn current_add_signal(signal: SignalFlags) {
-    let task = current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
     inner.signals |= signal;
 }
 
-pub fn add_initproc() {
-    add_task(INITPROC.clone());
+pub fn current_handle_signals() {
+    loop {
+        check_pending_signals();
+        let (frozen, killed) = {
+            let task = current_task().unwrap();
+            let inner = task.inner_exclusive_access();
+            (inner.signal_processor.frozen, inner.signal_processor.killed)
+        };
+        // abort signal handling when:
+        // 1. current process got SIGCONT (OR it's never been SIGSTOP-ed), which means this
+        // task done handling pending signals and can move on
+        // 2. current process got SIGKILL and this task be killed
+        if !frozen || killed {
+            break;
+        }
+        // frozen && !killed, then we give other process chance to fire SIGCONT to self
+        // and when this task is scheduled again, `frozen` will still be true, thus "yield"
+        // again (via `suspend_current_and_run_next`)
+        suspend_current_and_run_next();
+    }
 }
 
 fn check_pending_signals() {
-    for sig in 0..(MAX_SIG + 1) {
+    for signum in 0..=MAX_SIG {
+        let signal = SignalFlags::from_bits_truncate(1 << signum);
+        // we access current task inside loop to shorten UPSafeCell section
         let task = current_task().unwrap();
-        let inner = task.inner_exclusive_access();
-        let signal = SignalFlags::from_bits_truncate(1 << sig);
-
-        if !(inner.signals.contains(signal) && (!inner.signal_mask.contains(signal))) {
+        let signals = {
+            let process = task.process.upgrade().unwrap();
+            let inner = process.inner_exclusive_access();
+            inner.signals
+        };
+        // signum not fired
+        if !signals.contains(signal) {
             continue;
         }
-
-        let mut masked = true;
-        let handling_sig = inner.handling_sig;
-        if handling_sig == -1 {
-            masked = false;
-        } else {
-            let handling_sig = handling_sig as usize;
-            if !inner.signal_actions.table[handling_sig]
-                .mask
-                .contains(signal)
-            {
-                masked = false;
-            }
+        let inner = task.inner_exclusive_access();
+        // masked by task
+        if inner.signal_processor.is_global_masked(signal) {
+            continue;
         }
-        if masked {
+        // masked by handling signal action
+        if inner.signal_processor.is_handling_masked(signal) {
             continue;
         }
         drop(inner);
@@ -153,73 +217,70 @@ fn check_pending_signals() {
                 | SignalFlags::SIGCONT
                 | SignalFlags::SIGDEF
         ) {
-            // signal is a kernel signal
+            // kernel signal
             call_kernel_signal_handler(signal);
         } else {
-            // signal is a user signal
-            call_user_signal_handler(sig, signal);
+            // user signal
+            call_user_signal_handler(signum, signal);
             return;
         }
     }
 }
 
 fn call_kernel_signal_handler(signal: SignalFlags) {
-    let task = current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
+    let process = current_process();
+    let mut process_inner = process.inner_exclusive_access();
     match signal {
         SignalFlags::SIGSTOP => {
-            inner.frozen = true;
-            inner.signals ^= SignalFlags::SIGSTOP;
+            process_inner.tasks_for_each(|task| {
+                let mut task_inner = task.inner_exclusive_access();
+                task_inner.signal_processor.frozen = true;
+            });
+            process_inner.signals ^= SignalFlags::SIGSTOP;
         }
         SignalFlags::SIGCONT => {
-            if inner.signals.contains(SignalFlags::SIGCONT) {
-                inner.signals ^= SignalFlags::SIGCONT;
-                inner.frozen = false;
-            }
+            process_inner.tasks_for_each(|task| {
+                let mut task_inner = task.inner_exclusive_access();
+                task_inner.signal_processor.frozen = false;
+            });
+            process_inner.signals ^= SignalFlags::SIGCONT;
         }
         _ => {
-            inner.killed = true;
+            process_inner.tasks_for_each(|task| {
+                let mut task_inner = task.inner_exclusive_access();
+                task_inner.signal_processor.killed = true;
+            });
         }
     }
 }
 
-fn call_user_signal_handler(sig: usize, signal: SignalFlags) {
+fn call_user_signal_handler(signum: usize, signal: SignalFlags) {
     let task = current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
-    let handler = inner.signal_actions.table[sig].handler;
+    let mut task_inner = task.inner_exclusive_access();
+    let handler = task_inner.signal_processor.handler_for_action(signum);
     if handler == 0 {
-        // default action
         return;
     }
     // handle flag
-    inner.handling_sig = sig as isize;
-    inner.signals ^= signal;
+    let process = task.process.upgrade().unwrap();
+    process.inner_exclusive_access().signals ^= signal;
+    task_inner.signal_processor.signal_handling = Some(signum);
     // backup trapframe
-    let trap_cx = inner.get_trap_cx();
-    inner.trap_cx_backup = Some(*trap_cx);
+    let trap_cx = task_inner.get_trap_cx();
+    task_inner.signal_processor.trap_cx_backup = Some(*trap_cx);
     // modify trapframe
     trap_cx.sepc = handler;
     // put args (a0)
-    trap_cx.x[10] = sig;
-}
-
-pub fn handle_signals() {
-    loop {
-        check_pending_signals();
-        let (frozen, killed) = {
-            let task = current_task().unwrap();
-            let inner = task.inner_exclusive_access();
-            (inner.frozen, inner.killed)
-        };
-        if !frozen || killed {
-            break;
-        }
-        suspend_current_and_run_next();
-    }
+    trap_cx.x[10] = signum;
 }
 
 pub fn check_signals_error_of_current() -> Option<(i32, &'static str)> {
-    let task = current_task().unwrap();
-    let inner = task.inner_exclusive_access();
+    let process = current_process();
+    let inner = process.inner_exclusive_access();
     inner.signals.check_error()
+}
+
+pub fn remove_inactive_task(task: Arc<TaskControlBlock>) {
+    remove_task(task.clone());
+    remove_timer(&task);
 }

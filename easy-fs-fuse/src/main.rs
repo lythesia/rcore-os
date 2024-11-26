@@ -73,6 +73,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
         })
         .collect::<std::io::Result<Vec<_>>>()?;
     println!("easy-fs-use >>>>");
+    let mut size_total = 0;
     for app in apps {
         // load built app only from host file system
         let path = opt.target.join(&app);
@@ -88,12 +89,13 @@ fn easy_fs_pack() -> std::io::Result<()> {
             all_data.len(),
             all_data.len() / 1024
         );
+        size_total += all_data.len();
         // create a file in easy-fs
         let inode = root_inode.create(&app).unwrap();
         // write data to easy-fs
         inode.write_at(0, &all_data);
     }
-    println!("easy-fs-use <<<<");
+    println!("easy-fs-use (total: {}KB) <<<<", size_total / 1024);
     Ok(())
 }
 

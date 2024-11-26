@@ -6,11 +6,7 @@ use riscv::register::{
     sie, stval, stvec,
 };
 
-use crate::{
-    config::{TRAMPOLINE, TRAP_CONTEXT},
-    syscall::syscall,
-    task::SignalFlags,
-};
+use crate::{config::TRAMPOLINE, syscall::syscall, task::SignalFlags};
 
 mod context;
 
@@ -74,10 +70,18 @@ pub fn trap_handler() -> ! {
             }
         }
         scause::Trap::Exception(Exception::IllegalInstruction) => {
+            // let p = crate::task::current_process();
+            // log::error!("[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped. pid = {}",
+            //     scause.cause(),
+            //     stval,
+            //     crate::task::current_trap_cx().sepc,
+            //     p.getpid(),
+            // );
             crate::task::current_add_signal(SignalFlags::SIGILL);
         }
         scause::Trap::Interrupt(Interrupt::SupervisorTimer) => {
             crate::timer::set_next_trigger();
+            crate::timer::check_timer();
             crate::task::suspend_current_and_run_next();
         }
         _ => {
@@ -88,8 +92,8 @@ pub fn trap_handler() -> ! {
             );
         }
     }
-    // handle signals (handle the sent signal)
-    crate::task::handle_signals();
+    // handle signals
+    crate::task::current_handle_signals();
     // check error signals (if error then exit)
     if let Some((errno, msg)) = crate::task::check_signals_error_of_current() {
         println!("[kernel] {}", msg);
@@ -106,7 +110,8 @@ pub fn trap_return() -> ! {
     // 其实就是__alltraps, 这样之后app在trap的时候会跳转到__alltraps
     set_user_trap_entry();
     // __restore的参数a0, Trap 上下文在应用地址空间中的虚拟地址
-    let trap_cx_ptr = TRAP_CONTEXT;
+    // MUST use thread scope trap_cx addr, NOT the fixed TRAP_CONTEXT one!
+    let trap_cx_ptr = crate::task::current_trap_cx_user_va();
     // __restore的参数a1, 应用地址空间的 token
     let user_satp = crate::task::current_user_token();
 

@@ -20,10 +20,17 @@ else # ch$(T) only, plus initproc, user_shell, halt
 	APPS += $(APP_DIR)/initproc.rs $(APP_DIR)/user_shell.rs $(APP_DIR)/halt.rs
 endif
 
+DROP_APPS := $(filter $(wildcard $(APP_DIR)/ch*), $(wildcard $(APP_DIR)/*)) # exclude ch*.rs
+
 elf: $(APPS)
+ifeq ($(TEST), 0)
+	@cargo build $(MODE_ARG)
+	$(foreach app, $(DROP_APPS), rm -f $(TARGET_DIR)/$(basename $(notdir $(app)));)
+else
 	@$(foreach app, $(APPS), cargo build $(MODE_ARG) --bin $(basename $(notdir $(app)));)
+endif
 ifeq ($(TEST), 1)
-	@mv -f $(TARGET_DIR)/usertests $(TARGET_DIR)/initproc
+	@rm -f $(TARGET_DIR)/usertests && mv $(TARGET_DIR)/usertests $(TARGET_DIR)/initproc
 endif
 
 build: elf

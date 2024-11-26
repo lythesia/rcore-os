@@ -29,16 +29,11 @@ impl OSInode {
 
     pub fn read_all(&self) -> Vec<u8> {
         let mut inner = self.inner.exclusive_access();
-        let mut buffer = [0u8; 512];
-        let mut v = Vec::new();
-        loop {
-            let len = inner.inode.read_at(inner.offset, &mut buffer);
-            if len == 0 {
-                break;
-            }
-            inner.offset += len;
-            v.extend_from_slice(&buffer[..len]);
-        }
+        let size = inner.inode.get_size();
+        let mut v = alloc::vec![0u8; size];
+        let len = inner.inode.read_at(inner.offset, v.as_mut_slice());
+        assert_eq!(size, len);
+        inner.offset += len;
         v
     }
 
@@ -74,15 +69,6 @@ lazy_static! {
         let efs = EasyFileSystem::open(BLOCK_DEVICE.clone());
         Arc::new(EasyFileSystem::root_inode(&efs))
     };
-}
-
-/// List all files in the filesystems
-pub fn ls_root() {
-    println!("/**** ls / ****");
-    for app in ROOT_INODE.ls() {
-        println!("{}", app);
-    }
-    println!("**************/");
 }
 
 bitflags! {
