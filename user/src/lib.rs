@@ -409,7 +409,11 @@ bitflags! {
 
 impl Dirent {
     pub fn name(&self) -> &str {
-        core::str::from_utf8(&self.name[..]).unwrap()
+        let len = match self.name.iter().position(|v| v == &0) {
+            Some(idx) => idx,
+            _ => self.name.len(),
+        };
+        core::str::from_utf8(&self.name[..len]).unwrap()
     }
 }
 

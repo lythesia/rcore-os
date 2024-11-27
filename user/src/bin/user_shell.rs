@@ -6,12 +6,13 @@ extern crate alloc;
 #[macro_use]
 extern crate user_lib;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{collections::btree_set::BTreeSet, string::String, vec::Vec};
 use user_lib::{
     chdir, close, console::getchar, dup, exec, fork, getcwd, open, pipe, waitpid, OpenFlags,
 };
 
 const BS: u8 = 0x08;
+const HT: u8 = 0x09;
 const LF: u8 = 0x0a;
 const CR: u8 = 0x0d;
 const DL: u8 = 0x7f;
@@ -72,16 +73,107 @@ impl ProcessArguments {
     }
 }
 
+struct Completer {
+    // candidates
+    can: BTreeSet<String>,
+}
+
+impl Completer {
+    pub fn new() -> Self {
+        Self {
+            can: BTreeSet::new(),
+        }
+    }
+
+    pub fn load_root(&mut self) {
+        self.can.extend(root_bin());
+    }
+
+    pub fn load_ad_hoc(&mut self, iter: impl IntoIterator<Item = String>) {
+        self.can.extend(iter);
+    }
+
+    pub fn hint_for(&self, s: &str) -> Vec<&String> {
+        self.can.iter().filter(|v| v.starts_with(s)).collect()
+    }
+}
+
+fn root_bin() -> Vec<String> {
+    use user_lib::{getdents, Dirent, FileType};
+    let mut v = Vec::new();
+
+    let fd = open("/\0", OpenFlags::RDONLY);
+    if fd == -1 {
+        return v;
+    }
+
+    const BUF_SIZE: usize = 16;
+    let mut entries = alloc::vec![Dirent::default(); BUF_SIZE];
+    let mut n = BUF_SIZE;
+    loop {
+        n = match getdents(fd as usize, &mut entries.as_mut_slice()[..n]) {
+            -1 | 0 => break,
+            v => v as usize,
+        };
+        for i in 0..n {
+            let entry = &entries[i];
+            if entry.ftype == FileType::REG {
+                v.push(String::from(entry.name()));
+            }
+        }
+    }
+    v
+}
+
 #[no_mangle]
 fn main() -> i32 {
     println!("Rust user shell");
+    // completer
+    let mut comp = Completer::new();
+    comp.load_root();
+    comp.load_ad_hoc([String::from("cd"), String::from("pwd")]);
     let mut line: String = String::new();
+    let mut comp_leftover: Option<u8> = None;
     loop {
         line.clear();
         print!("{}", PROMPT);
         'repl: loop {
-            let c = getchar();
+            let c = match comp_leftover.take() {
+                Some(v) => v,
+                _ => getchar(),
+            };
             match c {
+                HT => {
+                    let par_input = match line.split_ascii_whitespace().last() {
+                        Some(v) if !v.is_empty() => String::from(v),
+                        _ => continue 'repl,
+                    };
+                    let hints = comp.hint_for(&par_input);
+                    if hints.is_empty() {
+                        continue 'repl;
+                    }
+
+                    let line_end = line.len();
+                    for hint in hints.iter().cycle() {
+                        let rest = &hint[par_input.len()..];
+                        print!("{}", rest);
+                        line.push_str(rest);
+
+                        let c = getchar();
+                        match c {
+                            HT => {
+                                // tab: clear & try next option
+                                clear_console_ch(rest.len());
+                                line.drain(line_end..);
+                            }
+                            _ => {
+                                // else: exit complete mode
+                                comp_leftover = Some(c);
+                                continue 'repl;
+                            }
+                        }
+                    }
+                }
                 LF | CR => {
                     println!("");
                     let input = line.trim();
@@ -215,7 +307,7 @@ fn main() -> i32 {
                             }
                             // exec
                             if exec(&args[0], args_addr.as_slice()) == -1 {
-                                println!("[shell] cannot exec: {}", args[0]);
+                                println!("[shell] cannot exec: `{}'", args[0]);
                                 return -4;
                             }
                             unreachable!()
@@ -241,9 +333,7 @@ fn main() -> i32 {
                 }
                 BS | DL => {
                     if !line.is_empty() {
-                        print!("{}", BS as char);
-                        print!(" ");
-                        print!("{}", BS as char);
+                        clear_console_ch(1);
                         line.pop();
                     }
                 }
@@ -253,6 +343,14 @@ fn main() -> i32 {
                 }
             }
         }
+    }
+}
+
+fn clear_console_ch(n: usize) {
+    for _ in 0..n {
+        print!("{}", BS as char); // move cursor back
+        print!(" "); // print SP to overwrite
+        print!("{}", BS as char); // then move cursor back again
     }
 }
 
