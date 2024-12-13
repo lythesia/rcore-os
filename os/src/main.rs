@@ -19,6 +19,7 @@ mod fs;
 mod lang_item;
 mod logging;
 mod mm;
+mod net;
 mod sbi;
 mod sync;
 mod syscall;
@@ -27,80 +28,43 @@ mod timer;
 mod trap;
 
 use core::arch::global_asm;
+use drivers::{CharDevice, KEYBOARD_DEVICE, UART};
+use lazy_static::lazy_static;
+use sync::UPIntrFreeCell;
 global_asm!(include_str!("entry.asm"));
 
-extern "C" {
-    fn stext();
-    fn etext();
-
-    fn srodata();
-    fn erodata();
-
-    fn sdata();
-    fn edata();
-
-    fn boot_stack_top();
-    fn boot_stack_lower_bound();
-
-    fn sbss();
-    fn ebss();
-
-    fn ekernel();
+lazy_static! {
+    pub static ref DEV_NON_BLOCKING_ACCESS: UPIntrFreeCell<bool> =
+        unsafe { UPIntrFreeCell::new(false) };
 }
 
 #[no_mangle]
 pub fn rust_main() -> ! {
     clear_bss();
-    logging::init();
-
-    log::info!(
-        "[kernel] {:<10} [{:#x}, {:#x})",
-        ".text",
-        stext as usize,
-        etext as usize
-    );
-    log::info!(
-        "[kernel] {:<10} [{:#x}, {:#x})",
-        ".rodata",
-        srodata as usize,
-        erodata as usize
-    );
-    log::info!(
-        "[kernel] {:<10} [{:#x}, {:#x})",
-        ".data",
-        sdata as usize,
-        edata as usize
-    );
-    log::info!(
-        "[kernel] {:<10} [{:#x}, {:#x})",
-        "boot_stack",
-        boot_stack_lower_bound as usize,
-        boot_stack_top as usize
-    );
-    log::info!(
-        "[kernel] {:<10} [{:#x}, {:#x})",
-        ".bss",
-        sbss as usize,
-        ebss as usize
-    );
-    log::info!(
-        "[kernel] {:<10} [{:#x}, {:#x})",
-        "phys",
-        ekernel as usize,
-        config::MEMORY_END,
-    );
 
     mm::init();
-    mm::remap_test();
-
-    task::add_initproc();
-
+    UART.init();
+    println!("KERN: init keyboard");
+    let _keyboard = KEYBOARD_DEVICE.clone();
+    println!("KERN: init trap");
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
 
+    board::device_init();
+
+    task::add_initproc();
+    *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
+
+    logging::init();
+
     task::run_tasks();
     panic!("Unreachable in rust_main!");
+}
+
+unsafe extern "C" {
+    fn sbss();
+    fn ebss();
 }
 
 fn clear_bss() {

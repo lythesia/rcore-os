@@ -12,6 +12,8 @@ extern crate alloc;
 #[macro_use]
 pub mod console;
 mod lang_item;
+mod net;
+pub use net::*;
 pub mod syscall;
 
 const USER_HEAP_SIZE: usize = 0x4000; // 16K

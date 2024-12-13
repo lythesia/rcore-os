@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use crate::{
-    sync::{CondVar, Mutex, MutexBlocking, MutexSpin, Semaphore},
+    sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore},
     task, timer,
 };
 
@@ -102,7 +102,7 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
 pub fn sys_condvar_create() -> isize {
     let process = task::current_process();
     let mut process_inner = process.inner_exclusive_access();
-    let cv = Some(Arc::new(CondVar::new()));
+    let cv = Some(Arc::new(Condvar::new()));
     if let Some(idx) = process_inner.condvar_list.iter().position(|v| v.is_none()) {
         process_inner.condvar_list[idx] = cv;
         idx as isize

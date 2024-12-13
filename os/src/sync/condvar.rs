@@ -1,22 +1,25 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 
-use crate::task::{block_current_and_run_next, current_task, wakeup_task, TaskControlBlock};
+use crate::task::{
+    block_current_and_run_next, block_current_task, current_task, wakeup_task, TaskContext,
+    TaskControlBlock,
+};
 
-use super::{Mutex, UPSafeCell};
+use super::{Mutex, UPIntrFreeCell};
 
-pub struct CondVar {
-    pub inner: UPSafeCell<CondVarInner>,
+pub struct Condvar {
+    pub inner: UPIntrFreeCell<CondVarInner>,
 }
 
 pub struct CondVarInner {
     pub wait_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
-impl CondVar {
+impl Condvar {
     pub fn new() -> Self {
         Self {
             inner: unsafe {
-                UPSafeCell::new(CondVarInner {
+                UPIntrFreeCell::new(CondVarInner {
                     wait_queue: VecDeque::new(),
                 })
             },
@@ -38,5 +41,12 @@ impl CondVar {
         drop(inner);
         block_current_and_run_next();
         mutex.lock();
+    }
+
+    pub fn wait_no_sched(&self) -> *mut TaskContext {
+        self.inner.exclusive_session(|inner| {
+            inner.wait_queue.push_back(current_task().unwrap());
+        });
+        block_current_task()
     }
 }

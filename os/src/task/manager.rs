@@ -4,7 +4,7 @@ use alloc::{
 };
 use lazy_static::lazy_static;
 
-use crate::sync::UPSafeCell;
+use crate::sync::UPIntrFreeCell;
 
 use super::{
     process::ProcessControlBlock,
@@ -12,10 +12,10 @@ use super::{
 };
 
 lazy_static! {
-    pub static ref TASK_MANAGER: UPSafeCell<TaskManager> =
-        unsafe { UPSafeCell::new(TaskManager::new()) };
-    pub static ref PID2PCB: UPSafeCell<BTreeMap<usize, Arc<ProcessControlBlock>>> =
-        unsafe { UPSafeCell::new(BTreeMap::new()) };
+    pub static ref TASK_MANAGER: UPIntrFreeCell<TaskManager> =
+        unsafe { UPIntrFreeCell::new(TaskManager::new()) };
+    pub static ref PID2PCB: UPIntrFreeCell<BTreeMap<usize, Arc<ProcessControlBlock>>> =
+        unsafe { UPIntrFreeCell::new(BTreeMap::new()) };
 }
 
 pub struct TaskManager {
@@ -38,16 +38,16 @@ impl TaskManager {
         self.ready_queue.pop_front()
     }
 
-    pub fn remove(&mut self, task: Arc<TaskControlBlock>) {
-        if let Some((id, _)) = self
-            .ready_queue
-            .iter()
-            .enumerate()
-            .find(|(_, t)| Arc::as_ptr(t) == Arc::as_ptr(&task))
-        {
-            self.ready_queue.remove(id);
-        }
-    }
+    // pub fn remove(&mut self, task: Arc<TaskControlBlock>) {
+    //     if let Some((id, _)) = self
+    //         .ready_queue
+    //         .iter()
+    //         .enumerate()
+    //         .find(|(_, t)| Arc::as_ptr(t) == Arc::as_ptr(&task))
+    //     {
+    //         self.ready_queue.remove(id);
+    //     }
+    // }
 }
 
 pub fn add_task(task: Arc<TaskControlBlock>) {
@@ -65,9 +65,9 @@ pub fn wakeup_task(task: Arc<TaskControlBlock>) {
     add_task(task);
 }
 
-pub fn remove_task(task: Arc<TaskControlBlock>) {
-    TASK_MANAGER.exclusive_access().remove(task);
-}
+// pub fn remove_task(task: Arc<TaskControlBlock>) {
+//     TASK_MANAGER.exclusive_access().remove(task);
+// }
 
 pub fn insert_into_pid2process(pid: usize, process: Arc<ProcessControlBlock>) {
     PID2PCB.exclusive_access().insert(pid, process);

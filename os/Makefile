@@ -18,6 +18,12 @@ BOARD := qemu
 SBI ?= rustsbi
 BOOTLOADER := ../bootloader/$(SBI)-$(BOARD).bin
 
+# GUI
+GUI ?= off
+ifeq ($(GUI), off)
+	GUI_OPTION := -display none
+endif
+
 # KERNEL ENTRY
 KERNEL_ENTRY_PA := 0x80200000
 
@@ -76,11 +82,21 @@ disasm-vim: kernel
 run: run-inner
 
 QEMU_ARGS := -machine virt \
-			 -nographic \
 			 -bios $(BOOTLOADER) \
+			 -serial stdio \
+			 $(GUI_OPTION) \
 			 -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) \
 			 -drive file=$(FS_IMG),if=none,format=raw,id=x0 \
-			 -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0
+			 -device virtio-blk-device,drive=x0 \
+			 -device virtio-gpu-device \
+			 -device virtio-keyboard-device \
+			 -device virtio-mouse-device \
+			 -device virtio-net-device,netdev=net0 \
+			 -netdev user,id=net0,hostfwd=udp::6200-:2000,hostfwd=tcp::6201-:80
+
+fdt:
+	@qemu-system-riscv64 -M 128m -machine virt,dumpdtb=virt.out
+	fdtdump virt.out
 
 QEMU_NAME := qemu-system-riscv64
 qemu-version-check:

@@ -1,10 +1,10 @@
 use alloc::{sync::Arc, vec::Vec};
-use context::TaskContext;
+pub use context::TaskContext;
 use id::TaskUserRes;
 use lazy_static::lazy_static;
-use manager::{remove_from_pid2process, remove_task};
+use manager::remove_from_pid2process;
 
-use crate::{fs, timer::remove_timer};
+use crate::fs;
 
 mod action;
 mod context;
@@ -22,8 +22,8 @@ pub use manager::{add_task, pid2process, wakeup_task};
 pub use mem::*;
 pub use process::{FileMapping, MMapReserve, MapRange, ProcessControlBlock};
 pub use processor::{
-    current_process, current_task, current_trap_cx, current_trap_cx_user_va, current_user_token,
-    run_tasks, user_time_end, user_time_start,
+    current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
+    current_user_token, run_tasks, schedule, user_time_end, user_time_start,
 };
 pub use signal::{SignalFlags, MAX_SIG};
 pub use task::{TaskControlBlock, TaskStatus};
@@ -42,10 +42,10 @@ pub fn suspend_current_and_run_next() {
     // 当仅有一个任务的时候, suspend_current_and_run_next 的效果是会继续执行这个任务
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
-    {
-        let process = task.process.upgrade().unwrap();
-        process.inner_exclusive_access().kernel_time += processor::refresh_stop_watch();
-    }
+    // {
+    //     let process = task.process.upgrade().unwrap();
+    //     process.inner_exclusive_access().kernel_time += processor::refresh_stop_watch();
+    // }
     task_inner.task_status = TaskStatus::Ready;
     drop(task_inner);
 
@@ -53,17 +53,22 @@ pub fn suspend_current_and_run_next() {
     processor::schedule(task_cx_ptr);
 }
 
-pub fn block_current_and_run_next() {
-    // There must be an application running.
+/// This function must be followed by a schedule
+pub fn block_current_task() -> *mut TaskContext {
     let task = processor::take_current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();
-    let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
-    {
-        let process = task.process.upgrade().unwrap();
-        process.inner_exclusive_access().kernel_time += processor::refresh_stop_watch();
-    }
+    // {
+    //     let process = task.process.upgrade().unwrap();
+    //     println!("@block_current_task process.inner_exclusive_access");
+    //     process.inner_exclusive_access().kernel_time += processor::refresh_stop_watch();
+    //     println!("@block_current_task done process.inner_exclusive_access");
+    // }
     task_inner.task_status = TaskStatus::Blocked;
-    drop(task_inner);
+    &mut task_inner.task_cx as *mut TaskContext
+}
+
+pub fn block_current_and_run_next() {
+    let task_cx_ptr = block_current_task();
     processor::schedule(task_cx_ptr);
 }
 
@@ -98,7 +103,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         remove_from_pid2process(pid);
         let mut process_inner = process.inner_exclusive_access();
         // curr_task完成
-        process_inner.kernel_time += processor::refresh_stop_watch();
+        // process_inner.kernel_time += processor::refresh_stop_watch();
         process_inner.is_zombie = true;
         process_inner.exit_code = exit_code;
         // access initproc TCB exclusively
@@ -113,7 +118,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         let mut recycle_res = Vec::<TaskUserRes>::new();
         for task in process_inner.tasks.iter().filter(|t| t.is_some()) {
             let task = task.as_ref().unwrap();
-            remove_inactive_task(task.clone());
+            // remove_inactive_task(task.clone());
             let mut task_inner = task.inner_exclusive_access();
             if let Some(res) = task_inner.res.take() {
                 recycle_res.push(res);
@@ -280,7 +285,7 @@ pub fn check_signals_error_of_current() -> Option<(i32, &'static str)> {
     inner.signals.check_error()
 }
 
-pub fn remove_inactive_task(task: Arc<TaskControlBlock>) {
-    remove_task(task.clone());
-    remove_timer(&task);
-}
+// pub fn remove_inactive_task(task: Arc<TaskControlBlock>) {
+//     remove_task(task.clone());
+//     remove_timer(&task);
+// }

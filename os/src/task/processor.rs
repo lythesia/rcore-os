@@ -1,7 +1,9 @@
+use core::arch::asm;
+
 use alloc::sync::Arc;
 use lazy_static::lazy_static;
 
-use crate::{sync::UPSafeCell, trap::TrapContext};
+use crate::{sync::UPIntrFreeCell, trap::TrapContext};
 
 use super::{
     context::TaskContext,
@@ -13,7 +15,7 @@ use super::{
 
 lazy_static! {
     // 在单核CPU环境下, 我们仅创建单个 Processor 的全局实例
-    pub static ref PROCESSOR: UPSafeCell<Processor> = unsafe { UPSafeCell::new(Processor::new()) };
+    pub static ref PROCESSOR: UPIntrFreeCell<Processor> = unsafe { UPIntrFreeCell::new(Processor::new()) };
 }
 
 pub struct Processor {
@@ -91,6 +93,16 @@ pub fn current_trap_cx_user_va() -> usize {
         .trap_cx_user_va()
 }
 
+pub fn current_kstack_top() -> usize {
+    if let Some(task) = current_task() {
+        task.kstack.get_top()
+    } else {
+        let mut boot_stack_top;
+        unsafe { asm!("la {},boot_stack_top",out(reg) boot_stack_top) };
+        boot_stack_top
+    }
+}
+
 /// 从 idle 控制流通过任务调度切换到某个任务开始执行
 pub fn run_tasks() {
     loop {
@@ -98,13 +110,10 @@ pub fn run_tasks() {
         if let Some(task) = manager::fetch_task() {
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
             // access coming task TCB exclusively
-            let mut task_inner = task.inner_exclusive_access();
-            let next_task_cx_ptr = &task_inner.task_cx as *const _;
-            task_inner.task_status = TaskStatus::Running;
-
-            // stop exclusively accessing coming task TCB manually
-            // 因为__switch是不会返回到当前的scope, 所以需要手动drop
-            drop(task_inner);
+            let next_task_cx_ptr = task.inner.exclusive_session(|task_inner| {
+                task_inner.task_status = TaskStatus::Running;
+                &task_inner.task_cx as *const TaskContext
+            });
             // Arc<TaskControlBlock> 形式的任务从TaskManager流动到了处Processor
             processor.current = Some(task);
             // 开始记录时间
@@ -123,31 +132,31 @@ pub fn run_tasks() {
 
 /// 当一个应用用尽了内核本轮分配给它的时间片或者它主动调用 yield 后, 内核会调用 `schedule` 函数来切换到 idle 控制流并开启新一轮的任务调度
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
-    let mut processor = PROCESSOR.exclusive_access();
-    let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
-    drop(processor);
+    let idle_task_cx_ptr =
+        PROCESSOR.exclusive_session(|processor| processor.get_idle_task_cx_ptr());
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
 }
 
 /// stop_watch <- now, return time of `last stop` until `now`
+#[allow(unused)]
 pub fn refresh_stop_watch() -> usize {
     PROCESSOR.exclusive_access().refresh_stop_watch()
 }
 
 pub fn user_time_start() {
-    let process = current_process();
-    let mut inner = process.inner_exclusive_access();
-    // 到user_time_start为止都是kernel_time, 故累加
-    // 隐含另一个意思, 从现在开始是user_time
-    inner.kernel_time += refresh_stop_watch();
+    // let process = current_process();
+    // let mut inner = process.inner_exclusive_access();
+    // // 到user_time_start为止都是kernel_time, 故累加
+    // // 隐含另一个意思, 从现在开始是user_time
+    // inner.kernel_time += refresh_stop_watch();
 }
 
 pub fn user_time_end() {
-    let process = current_process();
-    let mut inner = process.inner_exclusive_access();
-    // 类似上面, 到user_time_end为止都是user_time, 故累加
-    // 隐含另一个意思, 从现在开始是kernel_time
-    inner.user_time += refresh_stop_watch();
+    // let process = current_process();
+    // let mut inner = process.inner_exclusive_access();
+    // // 类似上面, 到user_time_end为止都是user_time, 故累加
+    // // 隐含另一个意思, 从现在开始是kernel_time
+    // inner.user_time += refresh_stop_watch();
 }

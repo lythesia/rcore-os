@@ -1,5 +1,3 @@
-use core::cell::RefMut;
-
 use alloc::collections::btree_map::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
@@ -16,7 +14,7 @@ use crate::mm::{
     frame_alloc, translated_refmut, FrameTracker, MapPermission, MemorySet, PageTable, PhysPageNum,
     VPNRange, VirtAddr, VirtPageNum, KERNEL_SPACE,
 };
-use crate::sync::{CondVar, Mutex, Semaphore, UPSafeCell};
+use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
 
 use super::id::RecycleAllocator;
@@ -30,7 +28,7 @@ pub struct ProcessControlBlock {
     // immutable
     pub pid: PidHandle,
     // mutable
-    inner: UPSafeCell<ProcessControlBlockInner>, // use `UPSafeCell` to provide `&self` only to external
+    inner: UPIntrFreeCell<ProcessControlBlockInner>, // use `UPSafeCell` to provide `&self` only to external
 }
 
 pub struct ProcessControlBlockInner {
@@ -42,7 +40,7 @@ pub struct ProcessControlBlockInner {
     pub fd_table: Vec<Option<Arc<dyn File>>>,
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
-    pub condvar_list: Vec<Option<Arc<CondVar>>>,
+    pub condvar_list: Vec<Option<Arc<Condvar>>>,
     pub signals: SignalFlags,
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
     pub task_res_allocator: RecycleAllocator,
@@ -56,7 +54,9 @@ pub struct ProcessControlBlockInner {
     pub cwd: Arc<Inode>,
 
     // time stats
+    #[allow(unused)]
     pub user_time: usize,
+    #[allow(unused)]
     pub kernel_time: usize,
 }
 
@@ -341,7 +341,7 @@ impl ProcessControlBlock {
         let process = Arc::new(Self {
             pid: pid_handle,
             inner: unsafe {
-                UPSafeCell::new(ProcessControlBlockInner {
+                UPIntrFreeCell::new(ProcessControlBlockInner {
                     is_zombie: false,
                     memory_set,
                     parent: None,
@@ -402,7 +402,7 @@ impl ProcessControlBlock {
         process
     }
 
-    pub fn inner_exclusive_access(&self) -> RefMut<'_, ProcessControlBlockInner> {
+    pub fn inner_exclusive_access(&self) -> UPIntrRefMut<'_, ProcessControlBlockInner> {
         self.inner.exclusive_access()
     }
 
@@ -439,7 +439,7 @@ impl ProcessControlBlock {
         let child = Arc::new(Self {
             pid: pid_handle,
             inner: unsafe {
-                UPSafeCell::new(ProcessControlBlockInner {
+                UPIntrFreeCell::new(ProcessControlBlockInner {
                     is_zombie: false,
                     memory_set,
                     parent: Some(Arc::downgrade(self)),

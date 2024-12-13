@@ -3,7 +3,8 @@ use core::arch::{asm, global_asm};
 pub use context::TrapContext;
 use riscv::register::{
     scause::{self, Exception, Interrupt},
-    sie, stval, stvec,
+    sie, sscratch, sstatus, stval, stvec,
+    utvec::TrapMode,
 };
 
 use crate::{config::TRAMPOLINE, syscall::syscall, task::SignalFlags};
@@ -17,14 +18,20 @@ pub fn init() {
 }
 
 fn set_kernel_trap_entry() {
+    extern "C" {
+        fn __alltraps();
+        fn __alltraps_k();
+    }
+    let __alltraps_k_va = __alltraps_k as usize - __alltraps as usize + TRAMPOLINE;
     unsafe {
-        stvec::write(trap_from_kernel as usize, stvec::TrapMode::Direct);
+        stvec::write(__alltraps_k_va, TrapMode::Direct);
+        sscratch::write(trap_from_kernel as usize);
     }
 }
 
 fn set_user_trap_entry() {
     unsafe {
-        stvec::write(TRAMPOLINE as usize, stvec::TrapMode::Direct);
+        stvec::write(TRAMPOLINE as usize, TrapMode::Direct);
     }
 }
 
@@ -32,6 +39,18 @@ fn set_user_trap_entry() {
 pub fn enable_timer_interrupt() {
     unsafe {
         sie::set_stimer(); // 实际是设置了sie寄存器的stie位, 使得S特权级时钟中断不会被屏蔽
+    }
+}
+
+fn enable_supervisor_interrupt() {
+    unsafe {
+        sstatus::set_sie();
+    }
+}
+
+fn disable_supervisor_interrupt() {
+    unsafe {
+        sstatus::clear_sie();
     }
 }
 
@@ -49,6 +68,7 @@ pub fn trap_handler() -> ! {
             // 而不是像之前那样作为参数传入 trap_handler
             let cx = crate::task::current_trap_cx();
             cx.sepc += 4;
+            enable_supervisor_interrupt();
             let ret = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]);
             // cx is changed during sys_exec, so we have to call it again
             let cx = crate::task::current_trap_cx();
@@ -84,6 +104,9 @@ pub fn trap_handler() -> ! {
             crate::timer::check_timer();
             crate::task::suspend_current_and_run_next();
         }
+        scause::Trap::Interrupt(Interrupt::SupervisorExternal) => {
+            crate::board::irq_handler();
+        }
         _ => {
             panic!(
                 "Unsupported trap {:?}, stval = {:#x}!",
@@ -106,6 +129,7 @@ pub fn trap_handler() -> ! {
 
 #[no_mangle]
 pub fn trap_return() -> ! {
+    disable_supervisor_interrupt();
     // stvec指向TRAMPOLINE, 我们已经map过从它开始的一个page(@MemorySet::map_trampoline), 指向物理地址的trap.S的code
     // 其实就是__alltraps, 这样之后app在trap的时候会跳转到__alltraps
     set_user_trap_entry();
@@ -139,6 +163,24 @@ pub fn trap_return() -> ! {
 }
 
 #[no_mangle]
-pub fn trap_from_kernel() -> ! {
-    panic!("a trap from kernel!");
+pub fn trap_from_kernel(_trap_cx: &TrapContext) {
+    let scause = scause::read();
+    let stval = stval::read();
+    match scause.cause() {
+        scause::Trap::Interrupt(Interrupt::SupervisorExternal) => {
+            crate::board::irq_handler();
+        }
+        scause::Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            crate::timer::set_next_trigger();
+            crate::timer::check_timer();
+            // do not schedule now
+        }
+        _ => {
+            panic!(
+                "Unsupported trap from kernel: {:?}, stval = {:#x}!",
+                scause.cause(),
+                stval
+            );
+        }
+    }
 }

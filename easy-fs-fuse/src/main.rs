@@ -26,6 +26,10 @@ impl BlockDevice for BlockFile {
             .expect("Error seeking!");
         assert_matches!(file.write(buf), Ok(BLOCK_SZ), "Not a complete block!");
     }
+
+    fn handle_irq(&self) {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, StructOpt)]
@@ -53,11 +57,11 @@ fn easy_fs_pack() -> std::io::Result<()> {
             .write(true)
             .create(true)
             .open(path)?;
-        f.set_len(16 * 2048 * 512)?;
+        f.set_len(32 * 2048 * 512)?;
         f
     })));
-    // 16MiB block dev, bitmap 1 block == at most 4095 files
-    let efs = EasyFileSystem::create(block_file, 16 * 2048, 1);
+    // 32MiB block dev; bitmap 1 block == at most 4095 files
+    let efs = EasyFileSystem::create(block_file, 32 * 2048, 1);
     let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
     let apps = read_dir(opt.source.as_path())?
         .into_iter()

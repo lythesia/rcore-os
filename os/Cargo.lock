@@ -65,6 +65,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
+name = "lose-net-stack"
+version = "0.1.0"
+source = "git+https://github.com/yfblock/lose-net-stack?rev=db42380#db4238008f0bb97f0b82550ef949c9a32ead59d2"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -79,9 +87,11 @@ dependencies = [
  "easy-fs",
  "lazy_static",
  "log",
+ "lose-net-stack",
  "riscv",
  "sbi-rt",
  "virtio-drivers",
+ "volatile",
  "xmas-elf",
 ]
 

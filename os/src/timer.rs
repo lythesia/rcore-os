@@ -5,7 +5,7 @@ use riscv::register::time;
 
 use crate::{
     config::CLOCK_FREQ,
-    sync::UPSafeCell,
+    sync::UPIntrFreeCell,
     task::{self, TaskControlBlock},
 };
 
@@ -35,8 +35,8 @@ pub fn set_next_trigger() {
 }
 
 lazy_static! {
-    static ref TIMERS: UPSafeCell<BinaryHeap<TimerCondVar>> =
-        unsafe { UPSafeCell::new(BinaryHeap::<TimerCondVar>::new()) };
+    static ref TIMERS: UPIntrFreeCell<BinaryHeap<TimerCondVar>> =
+        unsafe { UPIntrFreeCell::new(BinaryHeap::<TimerCondVar>::new()) };
 }
 
 pub struct TimerCondVar {
@@ -82,8 +82,8 @@ pub fn check_timer() {
     }
 }
 
-pub fn remove_timer(task: &Arc<TaskControlBlock>) {
-    let mut timers = TIMERS.exclusive_access();
-    let rm_ptr = Arc::as_ptr(&task);
-    timers.retain(|v| Arc::as_ptr(&v.task) != rm_ptr);
-}
+// pub fn remove_timer(task: &Arc<TaskControlBlock>) {
+//     let mut timers = TIMERS.exclusive_access();
+//     let rm_ptr = Arc::as_ptr(&task);
+//     timers.retain(|v| Arc::as_ptr(&v.task) != rm_ptr);
+// }

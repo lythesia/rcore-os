@@ -5,8 +5,8 @@ mod memory_set;
 mod page_table;
 
 pub use address::*;
-pub use frame_allocator::{frame_alloc, frame_dealloc, FrameTracker};
-pub use memory_set::{kernel_token, remap_test, MapPermission, MemorySet, KERNEL_SPACE};
+pub use frame_allocator::{frame_alloc, frame_alloc_more, frame_dealloc, FrameTracker};
+pub use memory_set::{kernel_token, MapPermission, MemorySet, KERNEL_SPACE};
 pub use page_table::*;
 
 pub fn init() {

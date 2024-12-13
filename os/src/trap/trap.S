@@ -11,6 +11,8 @@
     .section .text.trampoline
     .globl __alltraps
     .globl __restore
+    .globl __alltraps_k
+    .globl __restore_k
     // __alltraps 的地址 4 字节对齐，这是 RISC-V 特权级规范的要求
     .align 2
 __alltraps:
@@ -80,4 +82,37 @@ __restore:
     .endr
     // 直接恢复sp, x[2] -> sp, 即回到user stack
     ld sp, 2*8(sp)
+    sret
+
+    .align 2
+__alltraps_k:
+    addi sp, sp, -34*8
+    sd x1, 1*8(sp)
+    sd x3, 3*8(sp)
+    .set n, 5
+    .rept 27
+        SAVE_GP %n
+        .set n, n+1
+    .endr
+    csrr t0, sstatus
+    csrr t1, sepc
+    sd t0, 32*8(sp)
+    sd t1, 33*8(sp)
+    mv a0, sp
+    csrr t2, sscratch
+    jalr t2
+
+__restore_k:
+    ld t0, 32*8(sp)
+    ld t1, 33*8(sp)
+    csrw sstatus, t0
+    csrw sepc, t1
+    ld x1, 1*8(sp)
+    ld x3, 3*8(sp)
+    .set n, 5
+    .rept 27
+        LOAD_GP %n
+        .set n, n+1
+    .endr
+    addi sp, sp, 34*8
     sret

@@ -372,12 +372,17 @@ pub fn sys_getdents(fd: usize, ptr: *mut Dirent, len: usize) -> isize {
         Some(Some(file)) => {
             let file_clone = file.clone();
             match file_clone.downcast_arc::<OSInode>() {
-                Some(os_inode) if os_inode.is_dir() => os_inode.clone_inner_inode(),
+                Some(os_inode) => os_inode.clone_inner_inode(),
                 _ => return -1,
             }
         }
         _ => return -1,
     };
+    drop(inner); // MUST drop here, coz `file.dirents` causes block read, when non-blocking, it'll schedule out w/ RefMut held!
+    if !file.is_dir() {
+        return -1;
+    }
+
     let cursor = mm::translate_ref(token, unsafe { ptr.add(len - 1) }).next_offset;
     let dirents = file.dirents(cursor);
     let nread = len.min(dirents.len());

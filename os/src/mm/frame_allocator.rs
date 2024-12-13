@@ -4,13 +4,13 @@ use lazy_static::lazy_static;
 use crate::{
     config::MEMORY_END,
     mm::address::{PhysAddr, PhysPageNum},
-    sync::UPSafeCell,
+    sync::UPIntrFreeCell,
 };
 
 type FrameAllocatorImpl = StackFrameAllocator;
 lazy_static! {
-    pub static ref FRAME_ALLOCATOR: UPSafeCell<FrameAllocatorImpl> =
-        unsafe { UPSafeCell::new(FrameAllocatorImpl::new()) };
+    pub static ref FRAME_ALLOCATOR: UPIntrFreeCell<FrameAllocatorImpl> =
+        unsafe { UPIntrFreeCell::new(FrameAllocatorImpl::new()) };
 }
 
 pub fn init_frame_allocator() {
@@ -30,6 +30,13 @@ pub fn frame_alloc() -> Option<FrameTracker> {
         .exclusive_access()
         .alloc()
         .map(FrameTracker::new)
+}
+
+pub fn frame_alloc_more(num: usize) -> Option<Vec<FrameTracker>> {
+    FRAME_ALLOCATOR
+        .exclusive_access()
+        .alloc_more(num)
+        .map(|x| x.iter().map(|&t| FrameTracker::new(t)).collect())
 }
 
 pub fn frame_dealloc(ppn: PhysPageNum) {
@@ -83,6 +90,7 @@ impl Debug for FrameTracker {
 trait FrameAllocator {
     fn new() -> Self;
     fn alloc(&mut self) -> Option<PhysPageNum>;
+    fn alloc_more(&mut self, pages: usize) -> Option<Vec<PhysPageNum>>;
     fn dealloc(&mut self, ppn: PhysPageNum);
 }
 
@@ -123,6 +131,17 @@ impl FrameAllocator for StackFrameAllocator {
                 self.current += 1;
                 Some(ppn.into())
             }
+        }
+    }
+
+    fn alloc_more(&mut self, pages: usize) -> Option<Vec<PhysPageNum>> {
+        if self.current + pages >= self.end {
+            None
+        } else {
+            self.current += pages;
+            let arr: Vec<usize> = (1..pages + 1).collect();
+            let v = arr.iter().map(|x| (self.current - x).into()).collect();
+            Some(v)
         }
     }
 

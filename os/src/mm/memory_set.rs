@@ -8,7 +8,7 @@ use riscv::register::satp;
 use crate::{
     config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE},
     mm::address::StepByOne,
-    sync::UPSafeCell,
+    sync::UPIntrFreeCell,
 };
 
 use super::{
@@ -18,8 +18,8 @@ use super::{
 };
 
 lazy_static! {
-    pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
-        Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
+    pub static ref KERNEL_SPACE: Arc<UPIntrFreeCell<MemorySet>> =
+        Arc::new(unsafe { UPIntrFreeCell::new(MemorySet::new_kernel()) });
 }
 
 pub fn kernel_token() -> usize {
@@ -84,6 +84,11 @@ impl MapArea {
                 self.data_frames.insert(vpn, frame);
                 p
             }
+            MapType::Linear(pn_offset) => {
+                // check for sv39
+                assert!(vpn.0 < (1usize << 27));
+                PhysPageNum((vpn.0 as isize + pn_offset) as usize)
+            }
         };
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
@@ -145,6 +150,8 @@ impl MapArea {
 pub enum MapType {
     Identical,
     Framed,
+    #[allow(unused)]
+    Linear(isize), // offset of page num
 }
 
 bitflags! {

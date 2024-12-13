@@ -1,4 +1,4 @@
-use crate::{sbi::console_getchar, task::suspend_current_and_run_next};
+use crate::drivers::{CharDevice, UART};
 
 use super::File;
 
@@ -18,18 +18,7 @@ impl File for Stdin {
 
     fn read(&self, mut user_buf: crate::mm::UserBuffer) -> usize {
         assert_eq!(user_buf.len(), 1);
-        // busy loop
-        let mut c: usize;
-        loop {
-            c = console_getchar();
-            if c == 0 {
-                suspend_current_and_run_next();
-                continue;
-            } else {
-                break;
-            }
-        }
-        let ch = c as u8;
+        let ch = UART.read();
         unsafe {
             user_buf.buffers[0].as_mut_ptr().write_volatile(ch);
         }
