@@ -15,3 +15,7 @@ virtio-drivers = { git = "https://github.com/rcore-os/virtio-drivers", rev = "4e
 easy-fs = { path = "../easy-fs" }
 volatile = "0.3"
 lose-net-stack = { git = "https://github.com/yfblock/lose-net-stack", rev = "db42380" }
+tracer = { git = "https://github.com/os-module/rtrace" }
+
+[profile.release]
+debug = true

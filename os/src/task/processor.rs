@@ -93,6 +93,7 @@ pub fn current_trap_cx_user_va() -> usize {
         .trap_cx_user_va()
 }
 
+#[allow(unused)]
 pub fn current_kstack_top() -> usize {
     if let Some(task) = current_task() {
         task.kstack.get_top()

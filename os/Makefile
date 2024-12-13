@@ -31,8 +31,8 @@ KERNEL_ENTRY_PA := 0x80200000
 OBJDUMP := rust-objdump --arch-name=riscv64
 OBJCOPY := rust-objcopy --binary-architecture=riscv64
 
-# Disassembly
-DISASM ?= -x
+# Disassembly (--disassemble-all)
+DISASM ?= -D
 
 # Run usertests or usershell
 TEST ?= 0
@@ -44,7 +44,7 @@ ifneq ($(strip $(USE_DISK)),)
 	FS_IMG := $(USE_DISK)
 endif
 
-build: env $(KERNEL_BIN) $(if $(strip $(USE_DISK)), ,fs-img)
+build: env stack_trace $(KERNEL_BIN) $(if $(strip $(USE_DISK)), ,fs-img)
 
 env:
 	(rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)
@@ -61,10 +61,16 @@ fs-img: $(APPS)
 	@cd ../easy-fs-fuse && cargo run --release -- -s ../user/src/bin -t ../user/target/$(TARGET)/$(MODE)/
 
 $(APPS):
+# install trace_exe to generate elf symbol info
+stack_trace:
+	(cargo install --list | awk '/^\w/ {print $1}' | grep "cargo-binutils") || cargo install --git https://github.com/os-module/elfinfo
 
 kernel:
 	@echo Platform: $(BOARD)
+	@touch src/trace/kernel_symbol.S && rm src/trace/kernel_symbol.S
 	@cp src/linker-$(BOARD).ld src/linker.ld
+	@cargo build $(MODE_ARG)
+	@(nm -n ${KERNEL_ELF} | trace_exe > src/trace/kernel_symbol.S)
 	@cargo build $(MODE_ARG)
 	@rm src/linker.ld
 

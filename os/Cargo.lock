@@ -50,6 +50,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gimli"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22030e2c5a68ec659fde1e949a745124b48e6fa8b045b7ed5bd1fe4ccc5c4e5d"
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -90,6 +96,7 @@ dependencies = [
  "lose-net-stack",
  "riscv",
  "sbi-rt",
+ "tracer",
  "virtio-drivers",
  "volatile",
  "xmas-elf",
@@ -205,6 +212,16 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "tracer"
+version = "0.2.0"
+source = "git+https://github.com/os-module/rtrace#a02d62f74e11de9ea94b2ba71f4a0cd080f76932"
+dependencies = [
+ "bit_field",
+ "gimli",
+ "log",
+]
 
 [[package]]
 name = "virtio-drivers"

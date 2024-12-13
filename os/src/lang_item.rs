@@ -1,6 +1,8 @@
-use core::{arch::asm, panic::PanicInfo};
+use core::panic::PanicInfo;
 
-use crate::{sbi::shutdown, task::current_kstack_top};
+use tracer::{FramePointTracer, Tracer};
+
+use crate::sbi::shutdown;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -14,23 +16,15 @@ fn panic(info: &PanicInfo) -> ! {
     } else {
         log::error!("Panicked: {}", info.message());
     }
-    unsafe {
-        backtrace();
-    }
+    backtrace();
     shutdown(true)
 }
 
-unsafe fn backtrace() {
-    let mut fp: usize;
-    let stop = current_kstack_top();
-    asm!("mv {}, s0", out(reg) fp);
+fn backtrace() {
     println!("---START BACKTRACE---");
-    for i in 0..10 {
-        if fp == stop {
-            break;
-        }
-        println!("#{}:ra={:#x}", i, *((fp - 8) as *const usize));
-        fp = *((fp - 16) as *const usize);
+    let tracer = FramePointTracer::new(crate::trace::Provider);
+    for v in tracer.trace() {
+        println!("[{:#x}] (+{:0>4x}) {}", v.func_addr, v.bias, v.func_name);
     }
     println!("---END   BACKTRACE---");
 }

@@ -5,3 +5,5 @@
 os/src/link_app.S
 os/src/linker.ld
 user/build
+
+os/src/trace/kernel_symbol.S

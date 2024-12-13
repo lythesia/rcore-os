@@ -25,6 +25,7 @@ mod sync;
 mod syscall;
 mod task;
 mod timer;
+mod trace;
 mod trap;
 
 use core::arch::global_asm;
